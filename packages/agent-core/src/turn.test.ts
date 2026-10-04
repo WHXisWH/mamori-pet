@@ -391,6 +391,19 @@ describe('runPetTurn', () => {
     expect(deltas(chunks)).toEqual(['SAFE']);
   });
 
+  it('logs which tools the model chose in a turn, by name only', async () => {
+    const turns: Record<string, unknown>[] = [];
+    const { outcome } = await turn(petDemoScript(), 'やあ', {
+      onLog: (event, fields) => {
+        if (event === 'agent.turn') turns.push(fields as Record<string, unknown>);
+      },
+    });
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!['tools']).toEqual(outcome.toolCalls);
+    expect(turns[0]!['toolCalls']).toBe(outcome.toolCalls.length);
+    expect(JSON.stringify(turns[0])).not.toContain('やあ');
+  });
+
   it('never logs child text', async () => {
     const fields: Record<string, unknown>[] = [];
     await turn(petDemoScript(), 'ひみつのことば', { onLog: (_e, f) => fields.push(f) });

@@ -225,6 +225,8 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
     firstModelEventMs,
     firstVisibleTextMs,
     toolCalls: toolCalls.length,
+    // Tool names only (fixed identifiers chosen by the model); arguments may carry child input and are never logged.
+    tools: toolCalls,
     fallback: fallback !== null,
     replyChars: outcome.replyText.length,
   });
