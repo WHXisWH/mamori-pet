@@ -525,6 +525,7 @@ describe('conversation content completeness', () => {
       'D-ISO-001',
       'D-NEAR-001',
       'D-SELF-001',
+      'D-STORY-001',
     ]);
     expect(
       definitions

@@ -39,5 +39,6 @@
     "NODE_EXTRA_CA_CERTS"
   ],
   "globalEnv": ["NODE_ENV"],
+  "globalDependencies": ["kb/**"],
   "agentGuidance": false
 }
