@@ -1,0 +1,21 @@
+# DRAFT / 専門家未レビュー
+# 島の季節と、学校行事に合わせた限定アイテム。出典：docs/01-prd.md スコープ表 P1、モジュール2（島は季節とともに少しずつ育つ）、docs/03-database.md island/current.season（サーバー側が日付から計算する）。
+# months は日本時間の月。items はその季節に解放される catalogId（games/island_items.yaml で unlock=season:<id> のアイテムに対応）。
+# 学校行事との対応：spring=新学期（4月）、summer=夏休み（7〜8月）、autumn=運動会と文化祭（9〜11月）、winter=冬休みと雪。具体的な日付は学校ごとに違うため、ここでは季節だけで解放し、日付の判定はしない。
+seasons:
+  - id: spring
+    months: [3, 4, 5]
+    label_ja: はる
+    items: [cherry_tree, tulip, new_notebook]
+  - id: summer
+    months: [6, 7, 8]
+    label_ja: なつ
+    items: [sunflower, frog, windchime, watermelon]
+  - id: autumn
+    months: [9, 10, 11]
+    label_ja: あき
+    items: [maple_tree, deer, sports_flag, bunting]
+  - id: winter
+    months: [12, 1, 2]
+    label_ja: ふゆ
+    items: [pine_tree, penguin, snowman]

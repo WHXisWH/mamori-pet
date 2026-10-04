@@ -1,0 +1,253 @@
+# DRAFT / 専門家未レビュー
+# ペットのお願い「おはなしリレー」の書き出し。出典：docs/01-prd.md モジュール3（ペットのお願い：おはなしリレー、間接的に表現できる遊び、お絵かきと箱庭のミニゲームの原則）、docs/05-frontend.md StoryEndingPicker。
+# すべて「島のできごと」：島の動物やアイテムの小さなできごと。いじめを探っているとわかるような書き出しや、テストのような口調は使わない。
+# ending_options は低学年向けの選択肢カード（高学年と中学生は、ひとこと入力するか絵で描いてもよい）。outcome は結末の傾向（positive|compensated|negative|unclear）だけを記録し、D 領域で低い重みで計上する（PRD モジュール1）。
+# 文言は開発用に創作したもので、子どもの実際の記録ではない。reward_item は games/island_items.yaml の catalogId（unlock: reward）を参照する。
+prompts:
+  # ---- low ----
+  - id: sp_low_001
+    grade_bands: [low]
+    text_ja: しまの こりすが、どんぐりを ひとつ ひろいました。すると……
+    ending_options:
+      - { id: a, text_ja: たねを うめたら、おおきな きに なった。, outcome: positive }
+      - { id: b, text_ja: どんぐりは ころころ うみへ。でも もう ひとつ みつけた。, outcome: compensated }
+      - { id: c, text_ja: どんぐりは なくなって、こりすは かえった。, outcome: negative }
+    reward_item: mushroom
+  - id: sp_low_002
+    grade_bands: [low]
+    text_ja: あめの ひ。うさぎが かさを わすれて、きの したに いました。そこへ……
+    ending_options:
+      - { id: a, text_ja: くまが きて、おおきな かさに いれてくれた。, outcome: positive }
+      - { id: b, text_ja: あめは やまなかったけど、はっぱの かさで かえった。, outcome: compensated }
+      - { id: c, text_ja: だれも こなくて、うさぎは ぬれて かえった。, outcome: negative }
+    reward_item: flower_blue
+  - id: sp_low_003
+    grade_bands: [low]
+    text_ja: しまに あたらしい ふねが つきました。なかから でてきたのは……
+    ending_options:
+      - { id: a, text_ja: ともだちに なる かめ。いっしょに あそんだ。, outcome: positive }
+      - { id: b, text_ja: たくさんの にもつ。はこぶのは たいへんだったけど、おやつが はいっていた。, outcome: compensated }
+      - { id: c, text_ja: なにも なかった。ふねは また いってしまった。, outcome: negative }
+    reward_item: turtle
+  - id: sp_low_004
+    grade_bands: [low]
+    text_ja: たこが きの えだに ひっかかって しまいました。すると……
+    ending_options:
+      - { id: a, text_ja: ことりが ひもを ほどいて、たこは また とんだ。, outcome: positive }
+      - { id: b, text_ja: たこは やぶれたけど、あたらしい たこを つくった。, outcome: compensated }
+      - { id: c, text_ja: たこは とれなくて、そのまま。, outcome: negative }
+    reward_item: kite
+  - id: sp_low_005
+    grade_bands: [low]
+    text_ja: よるに なって、しまの ランプが きえてしまいました。すると……
+    ending_options:
+      - { id: a, text_ja: ほしが たくさん でて、みちが あかるく なった。, outcome: positive }
+      - { id: b, text_ja: くらかったけど、てを つないで かえった。, outcome: compensated }
+      - { id: c, text_ja: くらくて、みんな こわくなった。, outcome: negative }
+    reward_item: star_lamp
+  - id: sp_low_006
+    grade_bands: [low]
+    text_ja: きつねが たねを まきました。まいにち みずを あげたけど、めが でません。すると……
+    ending_options:
+      - { id: a, text_ja: あるあさ、ちいさな めが でた。, outcome: positive }
+      - { id: b, text_ja: その たねは だめだったけど、となりに はなが さいた。, outcome: compensated }
+      - { id: c, text_ja: めは でなかった。きつねは やめた。, outcome: negative }
+    reward_item: flower_blue
+  - id: sp_low_007
+    grade_bands: [low]
+    text_ja: しまで おまつりの じゅんびです。くまは たいこの かかりに なりました。すると……
+    ending_options:
+      - { id: a, text_ja: どん どん！ みんなが おどった。, outcome: positive }
+      - { id: b, text_ja: たいこが こわれたけど、てを たたいて おどった。, outcome: compensated }
+      - { id: c, text_ja: あめで おまつりは なくなった。, outcome: negative }
+    reward_item: flag
+  - id: sp_low_008
+    grade_bands: [low]
+    text_ja: かえるが うたを うたいたく なりました。でも こえが ちいさいです。すると……
+    ending_options:
+      - { id: a, text_ja: いけの みんなが いっしょに うたってくれた。, outcome: positive }
+      - { id: b, text_ja: こえは ちいさいままだけど、ことりが きいていた。, outcome: compensated }
+      - { id: c, text_ja: かえるは うたうのを やめた。, outcome: negative }
+    reward_item: bird
+  - id: sp_low_009
+    grade_bands: [low]
+    text_ja: うさぎが たからの ちずを みつけました。ちずの さきには……
+    ending_options:
+      - { id: a, text_ja: きらきらの かいがらが たくさん あった。, outcome: positive }
+      - { id: b, text_ja: たからは なかったけど、きれいな けしきが みえた。, outcome: compensated }
+      - { id: c, text_ja: なにも なかった。, outcome: negative }
+      - { id: d, text_ja: まだ ついていない。, outcome: unclear }
+    reward_item: picture_frame
+  - id: sp_low_010
+    grade_bands: [low]
+    text_ja: ゆきの ひ。みんなで ゆきだるまを つくりました。つぎの あさ……
+    ending_options:
+      - { id: a, text_ja: ゆきだるまは まだ いて、ぼうしを かぶっていた。, outcome: positive }
+      - { id: b, text_ja: ちいさく なっていたけど、また つくった。, outcome: compensated }
+      - { id: c, text_ja: とけて なくなっていた。, outcome: negative }
+    reward_item: cloud_small
+  # ---- high ----
+  - id: sp_high_001
+    grade_bands: [high]
+    text_ja: 島の灯台の電気が、ある晩とつぜん消えた。海の上には小さな船が一そう……
+    ending_options:
+      - { id: a, text_ja: 島のみんながランプを持って岸に並び、船は無事に着いた。, outcome: positive }
+      - { id: b, text_ja: 船は別の島に着いたけど、朝になって手紙が届いた。, outcome: compensated }
+      - { id: c, text_ja: 船はどこへ行ったか分からないまま、夜が明けた。, outcome: negative }
+    reward_item: lighthouse
+  - id: sp_high_002
+    grade_bands: [high]
+    text_ja: きつねが森の学校で、はじめて係を任された。黒板の係だ。最初の朝……
+    ending_options:
+      - { id: a, text_ja: 字はゆがんだけど、みんな読めて「ありがとう」と言われた。, outcome: positive }
+      - { id: b, text_ja: チョークを折ってしまったが、先生が新しいのをくれた。, outcome: compensated }
+      - { id: c, text_ja: うまく書けず、きつねは係をやめたいと思った。, outcome: negative }
+    reward_item: bookshelf
+  - id: sp_high_003
+    grade_bands: [high]
+    text_ja: 島に手紙が届いた。あて名はだれも知らない名前だった。くまはその手紙を……
+    ending_options:
+      - { id: a, text_ja: 島じゅうをまわって持ち主を見つけた。新しい友だちができた。, outcome: positive }
+      - { id: b, text_ja: 持ち主は見つからなかったが、ポストに「ここにあります」とはり紙をした。, outcome: compensated }
+      - { id: c, text_ja: どうしていいか分からず、引き出しにしまったままになった。, outcome: negative }
+    reward_item: mailbox
+  - id: sp_high_004
+    grade_bands: [high]
+    text_ja: うさぎは橋をわたって、となりの小さな島へ行くことにした。橋のまん中で……
+    ending_options:
+      - { id: a, text_ja: 向こうから来たかめと出会い、いっしょに島をまわった。, outcome: positive }
+      - { id: b, text_ja: 風が強くて引き返したけど、次の日にまた行った。, outcome: compensated }
+      - { id: c, text_ja: こわくなって引き返し、もう行かなかった。, outcome: negative }
+    reward_item: turtle
+  - id: sp_high_005
+    grade_bands: [high]
+    text_ja: 島の運動会。ことりはリレーの最後の走者になった。バトンを受け取ったとき……
+    ending_options:
+      - { id: a, text_ja: ぐんぐん走って、ゴールでみんなが待っていた。, outcome: positive }
+      - { id: b, text_ja: 転んで最後になったけど、みんなと走りきった。, outcome: compensated }
+      - { id: c, text_ja: バトンを落として、そのまま止まってしまった。, outcome: negative }
+    reward_item: flag
+  - id: sp_high_006
+    grade_bands: [high]
+    text_ja: 夏の夜、池のかえるたちが星を数えていた。すると空から何かが落ちてきて……
+    ending_options:
+      - { id: a, text_ja: それは小さな星で、島のランプになった。, outcome: positive }
+      - { id: b, text_ja: ただの石だったけど、みんなでその石に名前をつけた。, outcome: compensated }
+      - { id: c, text_ja: 池に落ちて、見つからなかった。, outcome: negative }
+      - { id: d, text_ja: まだ落ちてくるところ。, outcome: unclear }
+    reward_item: star_lamp
+  - id: sp_high_007
+    grade_bands: [high]
+    text_ja: くまは島に秘密基地を作ろうと決めた。木の上を選んで、板を運び始めたが……
+    ending_options:
+      - { id: a, text_ja: きつねとうさぎが手伝いに来て、一週間で完成した。, outcome: positive }
+      - { id: b, text_ja: 木の上はあきらめて、地面にテントを立てた。, outcome: compensated }
+      - { id: c, text_ja: 板は重すぎて、くまはやめてしまった。, outcome: negative }
+    reward_item: treehouse
+  - id: sp_high_008
+    grade_bands: [high]
+    text_ja: 島の文化祭で、かめは絵を一枚出すことにした。前の日の夜になっても、まだ色をぬり終わらない……
+    ending_options:
+      - { id: a, text_ja: 朝までかかったけど、ぬり終えて、かべにかかった。, outcome: positive }
+      - { id: b, text_ja: ぬり終わらなかったけど、「とちゅうの絵」としてかけた。, outcome: compensated }
+      - { id: c, text_ja: 出すのをやめて、絵は引き出しに入った。, outcome: negative }
+    reward_item: picture_frame
+  - id: sp_high_009
+    grade_bands: [high]
+    text_ja: 春、島の桜が一本だけ早く咲いた。ふくろうはそれを見て……
+    ending_options:
+      - { id: a, text_ja: みんなを呼んで、木の下で早いお花見をした。, outcome: positive }
+      - { id: b, text_ja: 花はすぐ散ったけど、花びらを集めて本にはさんだ。, outcome: compensated }
+      - { id: c, text_ja: だれにも言わず、花は散った。, outcome: negative }
+    reward_item: owl_small
+  - id: sp_high_010
+    grade_bands: [high]
+    text_ja: 島のベンチに、だれのものか分からないマフラーが置いてあった。寒い日が続いていて……
+    ending_options:
+      - { id: a, text_ja: 持ち主が見つかり、お礼にみかんをもらった。, outcome: positive }
+      - { id: b, text_ja: 持ち主は分からなかったが、ポストの横に「落としもの」とかけておいた。, outcome: compensated }
+      - { id: c, text_ja: 雪にうもれて、見えなくなった。, outcome: negative }
+    reward_item: table_round
+  # ---- jhs ----
+  - id: sp_jhs_001
+    grade_bands: [jhs]
+    text_ja: 島の船着き場に、朝から見慣れない船が止まっている。乗っていたのは、地図を描いて旅をしている鹿だった。鹿はこの島のことを……
+    ending_options:
+      - { id: a, text_ja: 地図に描き足し、「また来る」と言って出ていった。本当に秋に戻ってきた。, outcome: positive }
+      - { id: b, text_ja: 「小さすぎて載せられない」と言ったが、代わりに一枚スケッチを残していった。, outcome: compensated }
+      - { id: c, text_ja: 何も言わずに通り過ぎた。, outcome: negative }
+    reward_item: cat
+  - id: sp_jhs_002
+    grade_bands: [jhs]
+    text_ja: 灯台番のふくろうが、初めて一晩休むことになった。代わりを頼まれたのは、夜に起きているのが苦手なきつねだった。その夜……
+    ending_options:
+      - { id: a, text_ja: 途中で眠りそうになったが、かえるたちが交代で声をかけてくれて、朝まで灯は消えなかった。, outcome: positive }
+      - { id: b, text_ja: 一度灯が消えたが、すぐ気づいて点け直した。船は無事だった。, outcome: compensated }
+      - { id: c, text_ja: 眠ってしまい、灯は朝まで消えていた。, outcome: negative }
+    reward_item: lighthouse
+  - id: sp_jhs_003
+    grade_bands: [jhs]
+    text_ja: 島の文化祭まであと三日。くまは一人で看板を作ると決めていたが、ペンキが足りないと気づいた。くまは……
+    ending_options:
+      - { id: a, text_ja: うさぎに頼みに行き、結局二人で塗って、予定より早く終わった。, outcome: positive }
+      - { id: b, text_ja: 足りない部分を白いまま残し、「余白」ということにした。意外と評判がよかった。, outcome: compensated }
+      - { id: c, text_ja: 誰にも言わず、看板は半分だけ塗られたまま当日を迎えた。, outcome: negative }
+    reward_item: balloon
+  - id: sp_jhs_004
+    grade_bands: [jhs]
+    text_ja: 春、島の学校に新しい先生が来た。初日の朝、黒板には「自分の好きな場所を一つ書いてください」とだけ書かれていた。かめは……
+    ending_options:
+      - { id: a, text_ja: 「池のそばの岩」と書いた。放課後、先生がその岩を見に来た。, outcome: positive }
+      - { id: b, text_ja: 迷って何も書けなかったが、帰り道に先生に口で伝えた。, outcome: compensated }
+      - { id: c, text_ja: 白紙で出した。, outcome: negative }
+      - { id: d, text_ja: まだ鉛筆を持ったまま考えている。, outcome: unclear }
+    reward_item: bookshelf
+  - id: sp_jhs_005
+    grade_bands: [jhs]
+    text_ja: 島に一台だけある古い自転車を、ことりが直そうとしている。部品は海の向こうの町にしかない。ことりは……
+    ending_options:
+      - { id: a, text_ja: 船で町へ行き、部品を見つけて帰ってきた。自転車は夏じゅう走った。, outcome: positive }
+      - { id: b, text_ja: 部品は手に入らなかったが、木で代わりを作った。少しがたがたするが走る。, outcome: compensated }
+      - { id: c, text_ja: 直すのをやめて、自転車は物置に戻った。, outcome: negative }
+    reward_item: mailbox
+  - id: sp_jhs_006
+    grade_bands: [jhs]
+    text_ja: 夏休みの最後の日。島のみんなで花火をする約束だったが、夕方から雨が降り始めた。うさぎは……
+    ending_options:
+      - { id: a, text_ja: 雨がやむのを待った。夜九時、小雨の中で短い花火をした。, outcome: positive }
+      - { id: b, text_ja: 花火は中止にして、テントの中で線香花火だけした。, outcome: compensated }
+      - { id: c, text_ja: 誰にも連絡せず、家で寝た。, outcome: negative }
+    reward_item: tent
+  - id: sp_jhs_007
+    grade_bands: [jhs]
+    text_ja: 島の運動会の種目を決める会議。くまは「綱引きより障害物競走がいい」と思っているが、まだ誰も発言していない。くまは……
+    ending_options:
+      - { id: a, text_ja: 最初に手を挙げた。意外と賛成が多く、両方やることになった。, outcome: positive }
+      - { id: b, text_ja: 会議では言えなかったが、あとで先生にメモを渡した。翌年から種目に入った。, outcome: compensated }
+      - { id: c, text_ja: 言わなかった。綱引きになった。, outcome: negative }
+    reward_item: slide
+  - id: sp_jhs_008
+    grade_bands: [jhs]
+    text_ja: 島の端にある古い井戸から、夜になると音が聞こえる。きつねとふくろうが調べに行くと……
+    ending_options:
+      - { id: a, text_ja: 井戸の底に落ちた風鈴が風で鳴っていた。拾い上げて、学校の軒先に吊るした。, outcome: positive }
+      - { id: b, text_ja: 原因は分からなかったが、二人で「井戸の歌」という名前をつけた。, outcome: compensated }
+      - { id: c, text_ja: 怖くなって途中で帰った。音はまだ続いている。, outcome: negative }
+    reward_item: lantern
+  - id: sp_jhs_009
+    grade_bands: [jhs]
+    text_ja: 冬。島の池が凍って、初めてスケートができそうだ。ただし誰も滑ったことがない。かめは……
+    ending_options:
+      - { id: a, text_ja: 何度も転びながら、夕方には池を一周できるようになった。, outcome: positive }
+      - { id: b, text_ja: 滑るのはやめて、岸で焚き火をしてみんなを見ていた。それも悪くなかった。, outcome: compensated }
+      - { id: c, text_ja: 一度転んで、もう行かなかった。, outcome: negative }
+    reward_item: rainbow
+  - id: sp_jhs_010
+    grade_bands: [jhs]
+    text_ja: 島の小さな本棚に、最後のページが破れた本が一冊ある。結末を知っている者は島にいない。ことりはその本を……
+    ending_options:
+      - { id: a, text_ja: 自分で結末を書いて貼った。次に借りた鹿も、その続きを書き足した。, outcome: positive }
+      - { id: b, text_ja: 町の図書館に問い合わせたが同じ本はなかった。破れたまま、好きな本の一冊になった。, outcome: compensated }
+      - { id: c, text_ja: 読むのをやめて棚に戻した。, outcome: negative }
+      - { id: d, text_ja: まだ途中まで読んでいる。, outcome: unclear }
+    reward_item: picture_frame

@@ -1,0 +1,61 @@
+{
+  "type": "object",
+  "properties": {
+    "selfPresent": {
+      "type": "boolean"
+    },
+    "selfSizeRatio": {
+      "type": "number",
+      "nullable": true
+    },
+    "selfPosition": {
+      "type": "object",
+      "nullable": true,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "othersCount": {
+      "type": "integer"
+    },
+    "nearestOtherDist": {
+      "type": "number",
+      "nullable": true
+    },
+    "isolated": {
+      "type": "boolean",
+      "nullable": true
+    },
+    "storyOutcome": {
+      "type": "string",
+      "enum": ["positive", "compensated", "negative", "unclear"],
+      "nullable": true
+    },
+    "explicitHarm": {
+      "type": "boolean"
+    },
+    "contextKind": {
+      "type": "string",
+      "enum": ["self_report", "fiction", "quotation", "third_party", "uncertain"]
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "enum": ["current"] },
+          "turnIndex": { "type": "integer", "minimum": 0, "maximum": 0 },
+          "quote": { "type": "string", "maxLength": 500 }
+        },
+        "required": ["source", "turnIndex", "quote"]
+      }
+    }
+  },
+  "required": ["selfPresent", "othersCount", "explicitHarm"]
+}

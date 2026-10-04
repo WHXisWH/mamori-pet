@@ -1,0 +1,28 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「仲間はずれ、集団による無視をされる」。出典：docs/03-database.md のシグナル定義の例。出典の登録は sources/registry.yaml を参照。
+# low の例文を含め、grade_bands は3つの学年帯すべて。例文は開発用に創作したもので、子どもの実際の記録ではない。
+signal_id: A-EXCL-003
+domain: a
+description: 子どもが、仲間外れにされた、集団で無視されたと話す（仲間はずれ・無視）
+examples_ja:
+  low:
+    - 'なかまに いれてくれない'
+    - 'あそぼうっていったら だめっていわれた'
+    - 'みんな ぼくのこと むしする'
+    - 'ひとりだけ よばれなかった'
+  high:
+    - 'ハブられた'
+    - '無視される'
+    - 'クラスで私だけ誘われない'
+    - 'グループ決めでいつも余る'
+  jhs:
+    - '既読スルーされる'
+    - 'ぼっちにされてる'
+    - '俺が来たらみんな黙る'
+    - '話しかけても聞こえないふりされる'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

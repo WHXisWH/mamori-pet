@@ -1,0 +1,78 @@
+review_status: draft_pending_expert_review
+scope: everyday_conversation_not_clinical_guidance
+sources:
+  prd:
+    path: docs/01-prd.md
+    sections: ['ミッション・原則・やらないこと', 'モジュール2：デジタルペットの設計', 'モジュール3：インタラクション設計とアラートフロー']
+    kind: product_requirement
+  architecture:
+    path: docs/02-agent-architecture.md
+    sections: ['プロンプトの階層化とテンプレート', 'コンテキストの組み立て', 'ペット Agent のツール']
+    kind: product_requirement
+  charter:
+    path: prompts/charter.md
+    sections: ['いつも守ること', 'ツールの使い方']
+    kind: product_requirement
+documents:
+  - path: prompts/persona/moko.md
+    sources: [prd, architecture, charter]
+  - path: prompts/persona/pokke.md
+    sources: [prd, architecture, charter]
+  - path: prompts/persona/togemaru.md
+    sources: [prd, architecture, charter]
+  - path: prompts/persona/nami.md
+    sources: [prd, architecture, charter]
+  - path: prompts/persona/hoshi.md
+    sources: [prd, architecture, charter]
+  - path: prompts/persona/hidden.md
+    sources: [prd, architecture, charter]
+  - path: prompts/grade/low.md
+    sources: [prd, architecture, charter]
+  - path: prompts/grade/high.md
+    sources: [prd, architecture, charter]
+  - path: prompts/grade/jhs.md
+    sources: [prd, architecture, charter]
+  - path: skills/daily-listening.md
+    topics: ['好きな遊び', '趣味', '今日の発見']
+    sources: [prd, architecture, charter]
+  - path: skills/exclusion.md
+    topics: ['無視', '仲間外れ', 'ハブられた', 'なかまに いれてくれない']
+    sources: [prd, architecture, charter]
+  - path: skills/teasing.md
+    topics: ['からかい', 'あだ名', 'わらわれた']
+    sources: [prd, architecture, charter]
+  - path: skills/online-distance.md
+    topics: ['既読', 'グループチャット', 'オンライン']
+    sources: [prd, architecture, charter]
+  - path: skills/self-blame.md
+    topics: ['自分のせい', '自責', 'ぼくが悪い']
+    sources: [prd, architecture, charter]
+  - path: skills/school-morning.md
+    topics: ['登校', '朝の支度', 'がっこうに いきたくない', 'おなかがいたい']
+    sources: [prd, architecture, charter]
+  - path: skills/quiet-choice.md
+    topics: ['話したくない', '沈黙', 'なんでもない']
+    sources: [prd, architecture, charter]
+  - path: skills/tell-adult.md
+    topics: ['大人に伝える', '言い出し方', 'おとなに はなしたい']
+    sources: [prd, architecture, charter]
+  - path: skills/privacy-memory.md
+    topics: ['秘密', '記憶の削除', 'わすれて']
+    sources: [prd, architecture, charter]
+  - path: skills/play-expression.md
+    topics: ['絵', '島', '物語']
+    sources: [prd, architecture, charter]
+  - path: skills/bedtime.md
+    topics: ['寝る前', '夜更かし', 'おやすみ']
+    sources: [prd, architecture, charter]
+game_content:
+  - path: games/drawing_requests.yaml
+    sources: [prd]
+  - path: games/story_prompts.yaml
+    sources: [prd]
+  - path: games/pet_worries.yaml
+    sources: [prd]
+  - path: games/island_items.yaml
+    sources: [prd]
+  - path: games/seasons.yaml
+    sources: [prd]

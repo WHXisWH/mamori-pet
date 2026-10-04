@@ -1,0 +1,160 @@
+# 手動で submit するときは SHORT_SHA が空になるため、--substitutions=_IMAGE_TAG=$(git rev-parse --short HEAD) を必ず渡す。トリガーからのビルドは SHORT_SHA を使う。
+substitutions:
+  _REGION: asia-northeast1
+  _REPOSITORY: ijime
+  _ENVIRONMENT: dev
+  _IMAGE_TAG: ${SHORT_SHA}
+  _NODE_IMAGE: node:22-trixie # Debian 13：default-jre は Java 21（firebase-tools のエミュレーターは 21 以上が必要）
+  _TERRAFORM_IMAGE: hashicorp/terraform:1.13
+  _PUBLISH_KB: 'false'
+  _KB_VERSION: v0.1.0
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+  dynamicSubstitutions: true
+  env:
+    - NEXT_TELEMETRY_DISABLED=1
+    - ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false
+    - CI=true
+
+steps:
+  - id: install
+    name: ${_NODE_IMAGE}
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        test -n "${_IMAGE_TAG}" || { echo "_IMAGE_TAG が空です。手動で submit するときは --substitutions=_IMAGE_TAG=<git short sha> を付けてください"; exit 1; }
+        corepack enable && corepack prepare pnpm@10.33.0 --activate
+        pnpm install --frozen-lockfile
+
+  - id: lint
+    name: ${_NODE_IMAGE}
+    entrypoint: sh
+    waitFor: [install]
+    args:
+      - -c
+      - |
+        corepack enable && corepack prepare pnpm@10.33.0 --activate
+        pnpm lint
+        pnpm typecheck
+        pnpm kb:check
+
+  - id: build
+    name: ${_NODE_IMAGE}
+    entrypoint: sh
+    waitFor: [lint]
+    args:
+      - -c
+      - |
+        corepack enable && corepack prepare pnpm@10.33.0 --activate
+        pnpm build
+
+  - id: test
+    name: ${_NODE_IMAGE}
+    entrypoint: bash
+    waitFor: [build]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        apt-get update -qq >/dev/null
+        apt-get install -y -qq --no-install-recommends default-jre-headless >/dev/null
+        corepack enable && corepack prepare pnpm@10.33.0 --activate
+        pnpm --filter @ijime/child-web exec playwright install --with-deps chromium
+        # Firestore エミュレーターを先に単独でダウンロードする。複数のパッケージが同じ jar を初回に並列でダウンロードすると互いに壊してしまう
+        pnpm --filter @ijime/child-web exec firebase setup:emulators:firestore
+        # 8 コアのビルドマシンでは既定の 10 並列だとタイミングに敏感なテストがタイムアウトするため、4 並列に下げる
+        pnpm test --concurrency=4
+
+  - id: eval-scripted
+    name: ${_NODE_IMAGE}
+    entrypoint: sh
+    waitFor: [build]
+    args:
+      - -c
+      - |
+        set -eu
+        node scripts/eval-load.mjs --dry-run
+        node --test scripts/eval-load.test.mjs scripts/eval-run.test.mjs
+        for suite in crisis signal artwork pet; do
+          node scripts/eval-run.mjs --suite "$$suite" --mode scripted
+        done
+
+  - id: terraform-validate
+    name: ${_TERRAFORM_IMAGE}
+    entrypoint: sh
+    waitFor: ['-']
+    dir: infra/terraform
+    args:
+      - -c
+      - |
+        terraform fmt -check -recursive
+        terraform init -backend=false -input=false
+        terraform validate
+        terraform test
+
+  - id: terraform-plan
+    name: ${_TERRAFORM_IMAGE}
+    entrypoint: sh
+    waitFor: [terraform-validate]
+    dir: infra/terraform
+    args:
+      - -c
+      - |
+        if git diff --quiet HEAD~1 HEAD -- . 2>/dev/null; then
+          echo "infra/terraform unchanged; skipping plan"
+          exit 0
+        fi
+        if [ ! -f backend.hcl ] || [ ! -f terraform.tfvars ]; then
+          echo "backend.hcl / terraform.tfvars not provisioned on this builder; skipping plan"
+          exit 0
+        fi
+        terraform init -input=false -backend-config=backend.hcl
+        terraform plan -input=false -lock=false -var environment=${_ENVIRONMENT}
+
+  - id: kb-publish
+    name: ${_NODE_IMAGE}
+    entrypoint: sh
+    waitFor: [test]
+    args:
+      - -c
+      - |
+        if [ "${_PUBLISH_KB}" != "true" ]; then
+          echo "kb publish skipped (_PUBLISH_KB=${_PUBLISH_KB})"
+          exit 0
+        fi
+        node scripts/kb-publish.mjs kb/${_KB_VERSION} --project=${PROJECT_ID} --environment=${_ENVIRONMENT}
+
+  - id: docker-build
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    waitFor: [test]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        for svc in api voice-relay pet-agent signal-worker risk-engine notifier calendar-sync; do
+          image="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/$${svc}"
+          docker build -f services/$${svc}/Dockerfile \
+            -t "$${image}:${_IMAGE_TAG}" -t "$${image}:latest" .
+        done
+
+  - id: docker-push
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    waitFor: [docker-build]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        for svc in api voice-relay pet-agent signal-worker risk-engine notifier calendar-sync; do
+          image="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/$${svc}"
+          docker push "$${image}:${_IMAGE_TAG}"
+          docker push "$${image}:latest"
+        done
+
+images: []
+
+timeout: 3600s

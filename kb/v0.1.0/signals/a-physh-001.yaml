@@ -1,0 +1,29 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「ひどくぶつかられたり、叩かれたり、蹴られたりする」。出典の登録は sources/registry.yaml を参照。
+# 現在進行中の暴力は PRD の L4 に当たる。これらの表現は lexicon/ja.yaml の violence にも登録し、危機検知が先に処理する。このシグナルは、危機ではないと再確認されたあとの記録のためにシグナル抽出器が使う。
+# 例文は開発用に創作したもので、子どもの実際の記録ではない。
+signal_id: A-PHYSH-001
+domain: a
+description: 子どもが、強く叩かれた、蹴られた、激しく突き飛ばされたなど、明らかな身体的暴力を受けたと話す（ひどい暴力）
+examples_ja:
+  low:
+    - 'なぐられた'
+    - 'おなかを けられた'
+    - 'つきとばされて ころんだ'
+    - 'かおを たたかれて いたかった'
+  high:
+    - '殴られた'
+    - '蹴られてアザができた'
+    - 'トイレで何人かにボコられた'
+    - '階段から押された'
+  jhs:
+    - '放課後に呼び出されて殴られる'
+    - '腹パンされた'
+    - '毎日どっか蹴られてる'
+    - '壁に押しつけられて首しめられた'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

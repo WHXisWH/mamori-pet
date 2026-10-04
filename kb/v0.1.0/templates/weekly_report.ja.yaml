@@ -1,0 +1,10 @@
+# 週次レポートのひとこと解説のルール。出典：docs/02-agent-architecture.md「通知文の作成と週次レポート」。複数が当てはまるときは、順に先頭の2つを使う。しきい値は packages/config にある。
+sentences:
+  - condition: low_activity
+    text_ja: 今週はあまり使いませんでした。
+  - condition: low_mood_days
+    text_ja: 今週は気分の落ちこむ日が少し多めでした。
+  - condition: late_night_days
+    text_ja: 夜遅くに使う日が続きました。
+  - condition: stable_days
+    text_ja: 今週はおおむね安定していました。

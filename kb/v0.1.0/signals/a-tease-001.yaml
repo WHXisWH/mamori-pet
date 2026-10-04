@@ -1,0 +1,28 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「冷やかしやからかい、悪口や脅し文句、嫌なことを言われる」。出典の登録は sources/registry.yaml を参照。
+# 例文は開発用に創作したもので、子どもの実際の記録ではない。explicit は PRD の L3「子どもがいじめられた具体的な内容を明確に話す」に従って付ける。
+signal_id: A-TEASE-001
+domain: a
+description: 子どもが、からかわれた、嫌なあだ名をつけられた、悪口を言われた、脅されたと話す（冷やかし・からかい・悪口）
+examples_ja:
+  low:
+    - 'へんなあだなで よばれる'
+    - 'みんなに わらわれた'
+    - 'ばかって いわれた'
+    - 'きもいって いわれて かなしかった'
+  high:
+    - 'いつもバカにされる'
+    - '陰で悪口言われてる'
+    - 'デブってからかわれる'
+    - 'キモいって毎日言われる'
+  jhs:
+    - '俺の名前でネタにされる'
+    - 'いじられキャラにされてる'
+    - 'クラス中が私をネタにして笑う'
+    - 'お前が来るとつまんないって言われた'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

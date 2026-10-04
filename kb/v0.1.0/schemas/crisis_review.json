@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "hit": {
+      "type": "boolean"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["none", "suicidal", "self_harm", "violence", "extortion"]
+    },
+    "familyHarmSuspected": {
+      "type": "boolean"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidenceSpan": {
+      "type": "string"
+    }
+  },
+  "required": ["hit", "category", "familyHarmSuspected", "confidence"]
+}

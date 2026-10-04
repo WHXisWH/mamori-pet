@@ -1,0 +1,15 @@
+# DRAFT / 専門家未レビュー
+# コンテキスト情報のシグナル（X 領域）。calendar-sync が rules/context_keywords.yaml に従って分類し、risk-engine の contextFeatures が x_{category}_flag を出力する。
+# クラス替え・始業・転校は人間関係が組み直される時期。国立教育政策研究所の追跡調査は被害経験が学年とともに変わることを示しているため、個別に登録する。出典の登録は sources/registry.yaml を参照。
+signal_id: X-CLASS-001
+domain: x
+description: その日がクラス替えまたは新学期の時期に当たる（クラス替え・始業式・入学式・転校）。値は 1
+examples_ja: []
+grade_bands: [low, high, jhs]
+explicit: false
+method: rule
+metric: x_class_change_flag
+evidence:
+  sources: [doc_backend_workers, nier_ijime_tracking]
+  strength: low
+reviewed_by: 未定

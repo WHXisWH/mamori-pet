@@ -1,0 +1,192 @@
+# DRAFT / 専門家未レビュー
+# ペットのお願い「ペットのなやみ」。出典：docs/01-prd.md モジュール3（ペットのお願い：ペットのなやみ、間接的に表現できる遊び）、docs/05-frontend.md WorryOptions（選択肢は3〜4個で、必ず「大人に話す」を含む。選んだあとペットは定型テンプレートで返す）。
+# setup_ja はペットが出会った小さな困りごと。options.kind：tell_adult（大人に話す）|talk（本人や友だちと話す）|wait（少し待つ、自分で落ち着く）|other。どのお題にも tell_adult を1つ必ず入れる。
+# reply_ja は、ペットがアドバイスを聞いたあとの定型の返事。アドバイスの良し悪しを評価せず、説教もせず、聞いたことと試してみることだけを伝える。子どもの選択は重みの低い間接的なシグナルとしてだけ使い、単独では L3 にしない。
+# 文言は開発用に創作したもので、子どもの実際の記録ではない。reward_item は games/island_items.yaml の catalogId（unlock: reward）を参照する。
+items:
+  # ---- low ----
+  - id: pw_low_001
+    grade_bands: [low]
+    setup_ja: もりの がっこうで、きょう おにごっこに よんでもらえなかったんだ。どうしたら いいかな？
+    options:
+      - { id: a, text_ja: せんせいに はなす, kind: tell_adult }
+      - { id: b, text_ja: 「いれて」って いってみる, kind: talk }
+      - { id: c, text_ja: きょうは べつの あそびを する, kind: other }
+    reply_ja: そうか、それを やってみるね。きいてくれて ありがとう。
+    reward_item: swing
+  - id: pw_low_002
+    grade_bands: [low]
+    setup_ja: たいせつな ぼうしを どこかに おいてきちゃった。どうしよう？
+    options:
+      - { id: a, text_ja: おうちの ひとに いう, kind: tell_adult }
+      - { id: b, text_ja: きた みちを さがしに いく, kind: other }
+      - { id: c, text_ja: ちょっと まって、おもいだす, kind: wait }
+    reply_ja: なるほど。おしえてくれて ありがとう。やってみる。
+    reward_item: flag
+  - id: pw_low_003
+    grade_bands: [low]
+    setup_ja: あした、みんなの まえで うたを うたうの。どきどきして ねむれないよ。
+    options:
+      - { id: a, text_ja: おうちの ひとに どきどきを はなす, kind: tell_adult }
+      - { id: b, text_ja: ともだちと いっしょに れんしゅうする, kind: talk }
+      - { id: c, text_ja: ふかく いきを して、よこになる, kind: wait }
+    reply_ja: そうしてみるね。きみに はなしたら、ちょっと らくに なった。
+    reward_item: star_lamp
+  - id: pw_low_004
+    grade_bands: [low]
+    setup_ja: ともだちの えを まちがえて やぶっちゃった。まだ いえてない。どうしたら いい？
+    options:
+      - { id: a, text_ja: せんせいに いっしょに いってもらう, kind: tell_adult }
+      - { id: b, text_ja: じぶんで 「ごめんね」と いう, kind: talk }
+      - { id: c, text_ja: あたらしい かみを もっていく, kind: other }
+    reply_ja: うん、そうする。きいてくれて ありがとう。
+    reward_item: picture_frame
+  - id: pw_low_005
+    grade_bands: [low]
+    setup_ja: がっこうで、へんな あだなで よばれたんだ。ちょっと いやだった。どうしよう？
+    options:
+      - { id: a, text_ja: せんせいか おうちの ひとに はなす, kind: tell_adult }
+      - { id: b, text_ja: 「その なまえは やめて」って いう, kind: talk }
+      - { id: c, text_ja: きょうは はなれて あそぶ, kind: wait }
+    reply_ja: そうか。はなしたら、すこし すっきりした。やってみるよ。
+    reward_item: lantern
+  - id: pw_low_006
+    grade_bands: [low]
+    setup_ja: かみなりが こわくて、ゆうべ ねむれなかったの。きょうも くもってる。どうしたら いい？
+    options:
+      - { id: a, text_ja: おうちの ひとに そばに いてもらう, kind: tell_adult }
+      - { id: b, text_ja: ともだちと でんわで はなす, kind: talk }
+      - { id: c, text_ja: ランプを つけて、おきにいりの ほんを よむ, kind: other }
+    reply_ja: なるほど、それなら できそう。ありがとう。
+    reward_item: cloud_small
+  - id: pw_low_007
+    grade_bands: [low]
+    setup_ja: あした がっこうに いきたくないなあって おもってる。りゆうは うまく いえない。どうしよう？
+    options:
+      - { id: a, text_ja: おうちの ひとに 「いきたくない」って いってみる, kind: tell_adult }
+      - { id: b, text_ja: ともだちに あさ いっしょに いこうと さそう, kind: talk }
+      - { id: c, text_ja: ねて、あしたの あさ もういちど かんがえる, kind: wait }
+    reply_ja: そうしてみる。きいてくれて ありがとう。
+    reward_item: bird
+  # ---- high ----
+  - id: pw_high_001
+    grade_bands: [high]
+    setup_ja: 森の学校の班決めで、最後までどこの班にも入れなくて、先生が決めてくれたんだ。ちょっとへこんでる。どうしたらいいと思う？
+    options:
+      - { id: a, text_ja: 先生に、そのときの気持ちを話す, kind: tell_adult }
+      - { id: b, text_ja: 同じ班の子に、まず自分から話しかける, kind: talk }
+      - { id: c, text_ja: しばらく様子を見る, kind: wait }
+      - { id: d, text_ja: 班の仕事で自分ができることを探す, kind: other }
+    reply_ja: なるほど、そうしてみる。話を聞いてくれてありがとう。
+    reward_item: table_round
+  - id: pw_high_002
+    grade_bands: [high]
+    setup_ja: 友だちに貸した本が、二週間たっても返ってこない。言いにくいんだけど、どうしよう？
+    options:
+      - { id: a, text_ja: 先生かおうちの人に相談する, kind: tell_adult }
+      - { id: b, text_ja: 「あの本、読み終わった？」と聞いてみる, kind: talk }
+      - { id: c, text_ja: もう少し待つ, kind: wait }
+    reply_ja: うん、やってみるよ。教えてくれてありがとう。
+    reward_item: bookshelf
+  - id: pw_high_003
+    grade_bands: [high]
+    setup_ja: 島の運動会で、ぼくだけリレーの選手に選ばれなかった。走るのは好きなんだけど……どうしたらいい？
+    options:
+      - { id: a, text_ja: 先生に「走りたかった」と伝える, kind: tell_adult }
+      - { id: b, text_ja: 選ばれた子の応援団をやる, kind: other }
+      - { id: c, text_ja: 来年のために、今から練習する, kind: wait }
+    reply_ja: そうか。そういうやり方もあるんだね。ありがとう。
+    reward_item: slide
+  - id: pw_high_004
+    grade_bands: [high]
+    setup_ja: 友だちが最近元気がなさそうなんだ。理由を聞いていいのか分からない。どうしたらいい？
+    options:
+      - { id: a, text_ja: 先生に「心配な子がいる」と伝える, kind: tell_adult }
+      - { id: b, text_ja: 「なにかあった？」と、そっと聞いてみる, kind: talk }
+      - { id: c, text_ja: 聞かずに、いつもどおりそばにいる, kind: wait }
+    reply_ja: なるほど。そうしてみるね。聞いてくれてありがとう。
+    reward_item: flower_blue
+  - id: pw_high_005
+    grade_bands: [high]
+    setup_ja: 宿題を家に忘れてきちゃった。やったのに、やってないと思われそうでこわい。どうしよう？
+    options:
+      - { id: a, text_ja: 朝のうちに先生に正直に言う, kind: tell_adult }
+      - { id: b, text_ja: 友だちに「忘れたらどうしてる？」と聞く, kind: talk }
+      - { id: c, text_ja: 放課後に持ってきて出す, kind: other }
+    reply_ja: うん、そうする。教えてくれてありがとう。
+    reward_item: mailbox
+  - id: pw_high_006
+    grade_bands: [high]
+    setup_ja: 休み時間、グループで話していたら、ぼくの話だけみんな聞いてない気がした。気のせいかもしれないけど……どう思う？
+    options:
+      - { id: a, text_ja: 先生かおうちの人に話してみる, kind: tell_adult }
+      - { id: b, text_ja: 仲のいい一人に「さっきどう思った？」と聞く, kind: talk }
+      - { id: c, text_ja: 今日は気にせず、明日また見てみる, kind: wait }
+    reply_ja: そうか。話せてよかった。やってみる。
+    reward_item: kite
+  - id: pw_high_007
+    grade_bands: [high]
+    setup_ja: 友だちと約束していた日に、別の子からもさそわれた。どっちにも悪いことしたくない。どうしたらいい？
+    options:
+      - { id: a, text_ja: おうちの人に相談する, kind: tell_adult }
+      - { id: b, text_ja: あとからさそってくれた子に、理由を話して別の日にする, kind: talk }
+      - { id: c, text_ja: 三人でいっしょに遊べないか聞いてみる, kind: other }
+    reply_ja: なるほど、そういう手があるんだね。ありがとう。
+    reward_item: balloon
+  # ---- jhs ----
+  - id: pw_jhs_001
+    grade_bands: [jhs]
+    setup_ja: 森の学校のグループチャットで、自分の送ったメッセージだけ既読がつかない日が続いてる。気にしすぎかな。どうしたらいいと思う？
+    options:
+      - { id: a, text_ja: 先生か家の人に、いまの状況を話す, kind: tell_adult }
+      - { id: b, text_ja: 一人に直接「最近どう？」と聞いてみる, kind: talk }
+      - { id: c, text_ja: しばらくチャットから離れて様子を見る, kind: wait }
+      - { id: d, text_ja: チャット以外のつながりを増やす, kind: other }
+    reply_ja: なるほど。そうしてみる。話を聞いてもらえて助かった。
+    reward_item: lantern
+  - id: pw_jhs_002
+    grade_bands: [jhs]
+    setup_ja: 部活で先輩に注意されたことが、まだ引っかかってる。言い方がきつかったと思うんだけど、自分が気にしすぎなのかも。どう思う？
+    options:
+      - { id: a, text_ja: 顧問の先生か家の人に話してみる, kind: tell_adult }
+      - { id: b, text_ja: 同じ学年の仲間に「あれどう思った？」と聞く, kind: talk }
+      - { id: c, text_ja: 一晩おいて、それでも気になるなら考える, kind: wait }
+    reply_ja: そうか。そのやり方でいってみる。ありがとう。
+    reward_item: bookshelf
+  - id: pw_jhs_003
+    grade_bands: [jhs]
+    setup_ja: テストの点が思っていたより悪かった。家の人に見せるのが気が重い。どうしたらいい？
+    options:
+      - { id: a, text_ja: 点数と一緒に、どこが難しかったかも家の人に話す, kind: tell_adult }
+      - { id: b, text_ja: 友だちと答え合わせして、まず自分で原因を見る, kind: talk }
+      - { id: c, text_ja: 先生に、次に向けてどうすればいいか聞く, kind: other }
+    reply_ja: なるほど。そうしてみるよ。
+    reward_item: star_lamp
+  - id: pw_jhs_004
+    grade_bands: [jhs]
+    setup_ja: 友だちから「誰にも言わないで」と言われたことがあるんだけど、その内容がちょっと心配で。約束を守りたい気持ちもある。どうしたらいいと思う？
+    options:
+      - { id: a, text_ja: 友だちの安全が心配なら、信頼できる大人に相談する, kind: tell_adult }
+      - { id: b, text_ja: 友だち本人に「心配してる」と伝える, kind: talk }
+      - { id: c, text_ja: 少し様子を見てから決める, kind: wait }
+    reply_ja: そうか。考えてくれてありがとう。そうしてみる。
+    reward_item: owl_small
+  - id: pw_jhs_005
+    grade_bands: [jhs]
+    setup_ja: 最近、朝起きるのがつらくて学校に行くのが面倒に感じる。特に何かあったわけじゃないと思うんだけど。どうしたらいい？
+    options:
+      - { id: a, text_ja: 家の人か保健室の先生に、朝の様子を話す, kind: tell_adult }
+      - { id: b, text_ja: 友だちと朝だけ一緒に行く約束をする, kind: talk }
+      - { id: c, text_ja: 寝る時間を少し早くして一週間ためす, kind: other }
+    reply_ja: なるほど。そうしてみる。聞いてくれてありがとう。
+    reward_item: cloud_small
+  - id: pw_jhs_006
+    grade_bands: [jhs]
+    setup_ja: クラスで席替えがあって、周りが全員あまり話したことのない子になった。気楽に話せる相手がいなくて、昼休みがちょっと長い。どうしたらいいかな。
+    options:
+      - { id: a, text_ja: 先生に「席替え後、話しづらい」と伝える, kind: tell_adult }
+      - { id: b, text_ja: 隣の子に、授業のことでいいから一言話しかける, kind: talk }
+      - { id: c, text_ja: 昼休みは元の友だちのところへ行く, kind: other }
+      - { id: d, text_ja: 一週間くらい様子を見る, kind: wait }
+    reply_ja: そうか。そうしてみるよ。ありがとう。
+    reward_item: treehouse

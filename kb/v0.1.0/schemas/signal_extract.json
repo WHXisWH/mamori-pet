@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "properties": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "signalDefId": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "contextKind": {
+            "type": "string",
+            "enum": ["self_report", "fiction", "quotation", "third_party", "uncertain"]
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": { "type": "string", "enum": ["current", "prior"] },
+                "turnIndex": { "type": "integer", "minimum": 0, "maximum": 2 },
+                "quote": { "type": "string", "maxLength": 500 }
+              },
+              "required": ["source", "turnIndex", "quote"]
+            }
+          }
+        },
+        "required": ["signalDefId", "value", "explicit"]
+      }
+    },
+    "valence": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["school", "friends", "family", "study", "body", "hobby", "other"]
+      }
+    },
+    "schoolAvoidance": {
+      "type": "boolean"
+    }
+  },
+  "required": ["signals", "valence", "topics", "schoolAvoidance"]
+}

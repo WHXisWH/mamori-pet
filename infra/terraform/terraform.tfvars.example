@@ -1,0 +1,32 @@
+project_id          = "ijime-dev-XXXXXX"
+environment         = "dev"
+# 2 つの PWA の入口は Firebase Hosting サイト（hosting_site_ids、推奨値は mamori-child / mamori-guardian）
+child_web_origin    = "https://mamori-child.web.app"
+guardian_web_origin = "https://mamori-guardian.web.app"
+authorized_domains  = ["localhost", "mamori-child.web.app", "mamori-guardian.web.app"]
+# サイト ID が使用済みのときはここを変え、apps/child-web と apps/guardian-web の firebase.json も合わせて変更する
+# hosting_site_ids = { child = "mamori-child", guardian = "mamori-guardian" }
+# 保護者の Google ログインとカレンダー連携は同じ OAuth クライアントを使う。指定しなければどちらも有効にならない
+# google_oauth_client_id     = "XXXX.apps.googleusercontent.com"
+# google_oauth_client_secret = "TF_VAR_google_oauth_client_secret で渡し、ファイルには書かない"
+# カスタムドメイン。指定しなければ Cloud Run の既定 URL を使う
+# api_public_url = "https://api-dev.example.jp"
+# voice_ws_url   = "wss://voice-dev.example.jp/v1/voice"
+# cloudbuild_repository = "projects/ijime-dev-XXXXXX/locations/asia-northeast1/connections/github/repositories/REPOSITORY_NAME"
+# 7 つのサービスのイメージ（ルートの cloudbuild.yaml がプッシュしたあとに指定する）
+# image_tag = "abc1234"
+# 子ども側・保護者側のイメージ（apps/*/cloudbuild.yaml がプッシュしたあとに指定する）
+# web_image_tag = "abc1234"
+# FCM Web Push の VAPID 公開鍵（Firebase コンソールで生成する）
+# fcm_vapid_key = "B..."
+# 用途ごとの Gemini モデル（東京リージョンで動作を確認できたバージョンだけを指定する。音声の PET_VOICE など Live モデルは選定後に指定する）
+# gemini_models = {
+#   PET_CHAT            = "gemini-3.5-flash"
+#   CRISIS_SCREEN       = "gemini-3.5-flash"
+#   CRISIS_REVIEW       = "gemini-2.5-pro"
+#   SIGNAL_EXTRACT      = "gemini-3.5-flash"
+#   ARTWORK_FEATURE     = "gemini-3.5-flash"
+#   NOTIFICATION_WRITER = "gemini-2.5-pro"
+# }
+# Firestore CMEK のクォータが承認されていないときは false にする（データベース作成後は変更できない）
+# firestore_cmek_enabled = false

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": ["NEXT_OUTPUT", "NEXT_PUBLIC_CHILD_APP_URL", "NEXT_PUBLIC_GUARDIAN_APP_URL"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    }
+  }
+}

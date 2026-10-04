@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "suspect": {
+      "type": "boolean"
+    }
+  },
+  "required": ["suspect"]
+}

@@ -1,0 +1,107 @@
+# 日次特徴の定義。特徴名は領域の文字で始まる（docs/03-database.md）。
+# 各特徴は、1種類のシグナルを1つの方法で集計する：
+#   source.metric：ルールシグナルの元の計測値（signals.metric.name）
+#   source.model_domain：その領域でシグナル抽出 Agent が選んだシグナルの強さ（signals.value）
+#   agg：mean は値があるときだけ出力する。count と sum は、その日に子どものシグナルが1つでもあれば出力する（一致がなければ 0）
+#   filter.outside：[下限, 上限) の外にある値だけを数える
+#   worse：悪化の方向
+#   min_spread：ベースラインの四分位範囲の下限。安定した系列の小さな揺れを逸脱と判定しないため
+# 数値はすべて専門家レビュー待ち。
+features:
+  - name: a_valence_mean
+    domain: a
+    source: { metric: a_valence }
+    agg: mean
+    worse: down
+    min_spread: 0.2
+  - name: a_concern_sum
+    domain: a
+    source: { model_domain: a }
+    agg: sum
+    worse: up
+    min_spread: 0.5
+  - name: a_school_avoid_count
+    domain: a
+    source: { metric: a_school_avoid }
+    agg: count
+    worse: up
+    min_spread: 1
+  - name: i_message_count
+    domain: i
+    source: { metric: i_message_hour }
+    agg: count
+    worse: down
+    min_spread: 2
+  - name: i_late_night_count
+    domain: i
+    source: { metric: i_message_hour }
+    agg: count
+    filter: { outside: [5, 22] }
+    worse: up
+    min_spread: 1
+  - name: k_delete_ratio_mean
+    domain: k
+    source: { metric: k_delete_ratio }
+    agg: mean
+    worse: up
+    min_spread: 0.05
+  - name: k_compose_ms_mean
+    domain: k
+    source: { metric: k_compose_ms }
+    agg: mean
+    worse: up
+    min_spread: 5000
+  - name: k_long_pause_mean
+    domain: k
+    source: { metric: k_long_pause_count }
+    agg: mean
+    worse: up
+    min_spread: 1
+  - name: v_speech_rate_mean
+    domain: v
+    source: { metric: v_speech_rate }
+    agg: mean
+    worse: down
+    min_spread: 0.5
+  - name: v_pause_ratio_mean
+    domain: v
+    source: { metric: v_pause_ratio }
+    agg: mean
+    worse: up
+    min_spread: 0.05
+  - name: v_pitch_mean
+    domain: v
+    source: { metric: v_pitch_mean_hz }
+    agg: mean
+    worse: down
+    min_spread: 15
+  - name: m_mood_mean
+    domain: m
+    source: { metric: m_mood_score }
+    agg: mean
+    worse: down
+    min_spread: 0.5
+  - name: i_home_hour_mean
+    domain: i
+    source: { metric: i_home_hour }
+    agg: mean
+    worse: up
+    min_spread: 1
+  - name: d_self_size_mean
+    domain: d
+    source: { metric: d_self_size_ratio }
+    agg: mean
+    worse: down
+    min_spread: 0.05
+  - name: d_isolated_mean
+    domain: d
+    source: { metric: d_isolated }
+    agg: mean
+    worse: up
+    min_spread: 0.3
+  - name: d_story_negative_mean
+    domain: d
+    source: { metric: d_story_negative }
+    agg: mean
+    worse: up
+    min_spread: 0.3

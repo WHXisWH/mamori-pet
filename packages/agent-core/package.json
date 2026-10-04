@@ -1,0 +1,38 @@
+{
+  "name": "@ijime/agent-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "lint": "eslint src",
+    "test": "vitest run --project agent-core-unit && pnpm run test:firestore",
+    "clean": "rm -rf dist",
+    "test:firestore": "firebase --config firebase.json emulators:exec --only firestore --project demo-ijime \"vitest run --project agent-core-firestore\""
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^9.2.0",
+    "@google/adk": "^2.1.0",
+    "@google/genai": "^2.9.0",
+    "@ijime/api-types": "workspace:*",
+    "@ijime/config": "workspace:*",
+    "@ijime/crypto": "workspace:*",
+    "@ijime/kb-loader": "workspace:*",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.32.0"
+  }
+}

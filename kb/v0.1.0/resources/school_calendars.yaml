@@ -1,0 +1,66 @@
+# DRAFT / 専門家未レビュー
+# 学期カレンダーの仮データ。すべて verified: false。日付は日本の公立小中学校の一般的な慣例に基づく例示で、どの教育委員会が公表した日程でもない。
+# 用途：Google カレンダーを連携していない子どもについて、所在地の学期と長期休暇の期間から登校日／休みの日のコンテキスト情報（X 領域）を推定する。現時点でこのファイルを読むコードはない。
+# 保守の手順：
+#   1. 毎年 3 月ごろ、prefecture / city に対応する教育委員会が公表する「年間行事予定」や「学期の期間」をもとに、year、terms、long_breaks を1件ずつ更新する。
+#   2. 更新したら source_ids に出典を登録し（先に sources/registry.yaml にエントリを作る）、verified_at と verified_by を記入して、verified を true にする。
+#   3. 同じ都道府県でも市町村によって日程が違う場合（北海道の夏休みは地域によって異なる）は、必要に応じて city ごとに分ける。city が null のものは都道府県全体の通例を表す。
+#   4. 2学期制の自治体は terms を2つにする。school_level は小学校と中学校で日程が違う場合の区別に使う。
+#   5. 日付の形式は YYYY-MM-DD。start は end より後にできない。kb:check が検証する。
+version: '2026-10-03'
+reviewed_by: 未定
+calendars:
+  - id: tokyo_2026
+    prefecture: 東京都
+    city: null
+    school_level: both
+    year: 2026
+    terms:
+      - { name: 1学期, start: '2026-04-06', end: '2026-07-20' }
+      - { name: 2学期, start: '2026-08-26', end: '2026-12-25' }
+      - { name: 3学期, start: '2027-01-08', end: '2027-03-25' }
+    long_breaks:
+      - { name: 夏休み, start: '2026-07-21', end: '2026-08-25' }
+      - { name: 冬休み, start: '2026-12-26', end: '2027-01-07' }
+      - { name: 春休み, start: '2027-03-26', end: '2027-04-05' }
+    source_ids: [doc_prd]
+    verified: false
+    verified_at: null
+    verified_by: 未定
+    notes: 仮の値。区市町村ごとに異なる。東京都教育委員会または各区の年間行事予定で確認する。
+  - id: osaka_2026
+    prefecture: 大阪府
+    city: null
+    school_level: both
+    year: 2026
+    terms:
+      - { name: 1学期, start: '2026-04-07', end: '2026-07-17' }
+      - { name: 2学期, start: '2026-08-26', end: '2026-12-24' }
+      - { name: 3学期, start: '2027-01-07', end: '2027-03-24' }
+    long_breaks:
+      - { name: 夏休み, start: '2026-07-18', end: '2026-08-25' }
+      - { name: 冬休み, start: '2026-12-25', end: '2027-01-06' }
+      - { name: 春休み, start: '2027-03-25', end: '2027-04-06' }
+    source_ids: [doc_prd]
+    verified: false
+    verified_at: null
+    verified_by: 未定
+    notes: 仮の値。大阪市と府内他市で差がある。大阪府教育庁または各市教育委員会の公表資料で確認する。
+  - id: hokkaido_2026
+    prefecture: 北海道
+    city: null
+    school_level: both
+    year: 2026
+    terms:
+      - { name: 1学期, start: '2026-04-06', end: '2026-07-24' }
+      - { name: 2学期, start: '2026-08-18', end: '2026-12-24' }
+      - { name: 3学期, start: '2027-01-15', end: '2027-03-24' }
+    long_breaks:
+      - { name: 夏休み, start: '2026-07-25', end: '2026-08-17' }
+      - { name: 冬休み, start: '2026-12-25', end: '2027-01-14' }
+      - { name: 春休み, start: '2027-03-25', end: '2027-04-05' }
+    source_ids: [doc_prd]
+    verified: false
+    verified_at: null
+    verified_by: 未定
+    notes: 仮の値。北海道は夏休みが短く冬休みが長い。札幌市と他地域で差がある。北海道教育委員会または各市町村教育委員会の資料で確認する。

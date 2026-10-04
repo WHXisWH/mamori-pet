@@ -1,0 +1,33 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "../../kb/**"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/local-*/**"]
+    },
+    "build:local": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "../../kb/**"],
+      "env": ["LOCAL_PORT_OFFSET", "NEXT_DIST_DIR"],
+      "outputs": [".next/local-*/**", "!.next/local-*/cache/**"]
+    },
+    "test": {
+      "dependsOn": [
+        "build:local",
+        "@ijime/guardian-web#build:local",
+        "@ijime/guardian-web#test",
+        "@ijime/api#build",
+        "@ijime/pet-agent#build",
+        "@ijime/signal-worker#build",
+        "@ijime/risk-engine#build",
+        "@ijime/notifier#build",
+        "@ijime/voice-relay#build"
+      ],
+      "env": ["LOCAL_PORT_OFFSET", "NEXT_DIST_DIR"],
+      "outputs": [],
+      "cache": false
+    }
+  }
+}

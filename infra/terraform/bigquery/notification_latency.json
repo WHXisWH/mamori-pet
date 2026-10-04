@@ -1,0 +1,7 @@
+[
+  { "name": "notification_id", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "level", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "detected_at", "type": "TIMESTAMP", "mode": "REQUIRED" },
+  { "name": "sent_at", "type": "TIMESTAMP", "mode": "NULLABLE" },
+  { "name": "acknowledged_at", "type": "TIMESTAMP", "mode": "NULLABLE" }
+]

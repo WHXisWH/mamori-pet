@@ -1,0 +1,13 @@
+{
+  "content": {
+    "roles/cloudkms.cryptoKeyEncrypterDecrypter": ["pet-agent", "voice-relay", "signal-worker"],
+    "roles/cloudkms.cryptoKeyDecrypter": ["api"],
+    "roles/cloudkms.cryptoKeyEncrypter": ["api"]
+  },
+  "tokens": {
+    "roles/cloudkms.cryptoKeyEncrypterDecrypter": ["api", "calendar-sync"]
+  },
+  "pseudo": {
+    "roles/cloudkms.signerVerifier": ["api", "signal-worker"]
+  }
+}

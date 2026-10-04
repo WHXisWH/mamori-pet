@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+@import '@ijime/ui/theme.css';
+@source '../../../../packages/ui/src';
+
+:root {
+  color-scheme: light;
+}
+
+html[data-night='true'] .rounded-card,
+html[data-night='true'] .bg-white {
+  filter: brightness(0.92);
+}

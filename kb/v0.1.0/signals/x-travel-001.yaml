@@ -1,0 +1,15 @@
+# DRAFT / 専門家未レビュー
+# コンテキスト情報のシグナル（X 領域）。calendar-sync が rules/context_keywords.yaml に従って分類し、risk-engine の contextFeatures が x_{category}_flag を出力する。
+# 旅行・帰省の期間はやりとりのリズムや帰宅チェックインが変わる。休みの日のコンテキスト情報として扱う。出典の登録は sources/registry.yaml を参照。
+signal_id: X-TRAVEL-001
+domain: x
+description: その日が旅行または帰省の時期に当たる（旅行・帰省・キャンプ）。値は 1
+examples_ja: []
+grade_bands: [low, high, jhs]
+explicit: false
+method: rule
+metric: x_travel_flag
+evidence:
+  sources: [doc_backend_workers, doc_prd]
+  strength: low
+reviewed_by: 未定

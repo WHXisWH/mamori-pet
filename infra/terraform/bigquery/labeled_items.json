@@ -1,0 +1,8 @@
+[
+  { "name": "item_id", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "source", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "grade_band", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "expert_label", "type": "JSON", "mode": "REQUIRED" },
+  { "name": "labeler", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "kb_version", "type": "STRING", "mode": "REQUIRED" }
+]

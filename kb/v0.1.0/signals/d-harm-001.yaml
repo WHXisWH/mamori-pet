@@ -1,0 +1,13 @@
+# 作品特徴が explicitHarm のときに explicit シグナルを1件書く。専門家レビュー待ち。出典の登録は sources/registry.yaml を参照。
+# シグナル抽出 Agent の選択対象にはしない。作品特徴 Agent の explicitHarm、または島の語りの explicitHarm から書き起こす。value は 1。
+signal_id: D-HARM-001
+domain: d
+description: 作品や語りの中に、自分または他人が傷つけられる場面がはっきり出てくる
+examples_ja: []
+grade_bands: [low, high, jhs]
+explicit: true
+method: rule
+evidence:
+  sources: [doc_backend_workers, doc_agent_architecture]
+  strength: medium
+reviewed_by: 未定

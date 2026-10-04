@@ -1,0 +1,29 @@
+{
+  "checkedOn": "2026-10-02",
+  "models": [
+    {
+      "id": "gemini-live-2.5-flash-native-audio",
+      "source": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash-live-api",
+      "regions": [
+        "us-central1",
+        "us-east1",
+        "us-east4",
+        "us-east5",
+        "us-south1",
+        "us-west1",
+        "us-west4",
+        "europe-central2",
+        "europe-north1",
+        "europe-southwest1",
+        "europe-west1",
+        "europe-west4",
+        "europe-west8"
+      ]
+    },
+    {
+      "id": "gemini-3.8-live",
+      "source": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-8-live",
+      "regions": ["us", "eu", "us-central1"]
+    }
+  ]
+}

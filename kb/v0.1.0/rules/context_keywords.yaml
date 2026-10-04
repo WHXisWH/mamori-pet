@@ -1,0 +1,16 @@
+# カレンダーの予定名 → コンテキスト情報のカテゴリ。モデルは使わない。
+# 照合の前に、予定名とキーワードの両方を NFKC 正規化し、カタカナをひらがなに変換する。リストの順に見て、最初に一致したカテゴリを採用する。
+# キーワードは専門家による追加待ち。
+categories:
+  - category: exam
+    keywords: [テスト, 試験, 期末, 中間, 模試, 検定, 受験, 入試]
+  - category: long_vacation
+    keywords: [夏休み, 冬休み, 春休み, 長期休暇]
+  - category: school_event
+    keywords: [運動会, 体育祭, 修学旅行, 遠足, 文化祭, 学芸会, 音楽会, 林間学校, 宿泊学習, 授業参観]
+  - category: class_change
+    keywords: [クラス替え, 始業式, 入学式, 転校]
+  - category: sick
+    keywords: [入院, 通院, 病欠]
+  - category: travel
+    keywords: [旅行, 帰省, キャンプ]

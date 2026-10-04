@@ -1,0 +1,10 @@
+rules_version = '2';
+
+// クライアントは Firestore に直接接続しない。読み書きはすべてバックエンド API を経由する。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

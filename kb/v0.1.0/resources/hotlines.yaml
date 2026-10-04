@@ -1,0 +1,81 @@
+# DRAFT / 専門家未レビュー
+# 相談窓口のマスターデータ。出典：docs/01-prd.md モジュール3の相談窓口一覧。
+# resources：GET /v1/child/help-resources と危機時の定型文が返す項目。並び順がそのまま表示順になる。
+# candidates：候補の項目で、API は返さない。1件ずつ人が確認（official_url を開く、電話をかけるか番号と受付時間を確かめる）してから verified_at / verified_by を記入し、resources に移す。確認手順は kb/v0.1.0/README.md を参照。
+# verified_at が null のものは未確認。official_url には確実にわかっている公式ドメインだけを書き、確認時に具体的なページへ書き換える。
+version: '2026-10-03'
+resources:
+  - id: sos_dial
+    name: 24時間子供SOSダイヤル
+    phone: '0120-0-78310'
+    hours: 24時間
+    audience: 子どもと保護者
+    official_url: https://www.mext.go.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: 文部科学省。都道府県・指定都市教育委員会の相談窓口につながる。
+  - id: childline
+    name: チャイルドライン
+    phone: '0120-99-7777'
+    hours: 公式サイトを確認
+    url: https://childline.or.jp/
+    audience: 18歳まで
+    official_url: https://childline.or.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: 受付時間とチャット相談の有無を確認時に確かめる。
+  - id: jidou_soudan
+    name: 児童相談所虐待対応ダイヤル
+    phone: '189'
+    hours: 24時間
+    audience: 虐待に関すること
+    official_url: https://www.cfa.go.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: こども家庭庁。家庭内での危害が疑われるとき（PRD モジュール3の例外フロー）に優先して表示する。
+  - id: emergency
+    name: 警察・救急
+    phone: '110 / 119'
+    hours: 24時間
+    audience: 緊急の危険があるとき
+    official_url: https://www.npa.go.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: 110 は警察庁、119 は消防庁（https://www.fdma.go.jp/）。
+candidates:
+  - id: kodomo_jinken_110
+    name: 子どもの人権110番
+    phone: '0120-007-110'
+    hours: 公式サイトを確認（平日昼間の見込み）
+    audience: 子どもと保護者（いじめ・人権）
+    official_url: https://www.moj.go.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: 法務省・法務局。番号と受付時間を確認してから resources に移す。
+  - id: kokoro_dial
+    name: こころの健康相談統一ダイヤル
+    phone: '0570-064-556'
+    hours: 都道府県により異なる（公式サイトを確認）
+    audience: 本人と家族（こころの不調）
+    official_url: https://www.mhlw.go.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: 厚生労働省。発信地の都道府県・政令市の窓口につながる。子ども向け表示にするか専門家と相談。
+  - id: yorisoi
+    name: よりそいホットライン
+    phone: '0120-279-338'
+    hours: 24時間（公式サイトを確認）
+    audience: 誰でも（生活・こころ・暴力など）
+    official_url: https://www.since2011.net/
+    verified_at: null
+    verified_by: 未定
+    notes: 一般社団法人社会的包摂サポートセンター。岩手・宮城・福島は別番号。
+  - id: sns_soudan
+    name: SNS相談（文部科学省・こども家庭庁）
+    url: https://www.mext.go.jp/
+    hours: 窓口により異なる（公式サイトを確認）
+    audience: 子ども（LINE 等のチャット相談）
+    official_url: https://www.mext.go.jp/
+    verified_at: null
+    verified_by: 未定
+    notes: 文科省「SNS等を活用した相談体制」と、こども家庭庁の相談窓口一覧（https://www.cfa.go.jp/）。実際の入口 URL・対象学年・受付時間を確認してから掲載。

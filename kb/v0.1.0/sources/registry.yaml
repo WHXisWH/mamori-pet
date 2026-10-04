@@ -1,0 +1,157 @@
+# DRAFT / 専門家未レビュー
+# 出典の登録簿。シグナル・語彙表・ルール・背景データは、ここに登録した id だけを参照できる。
+# url には確実にわかっている公式ドメインかリポジトリ内のパスだけを書く。verified: false は、URL・年・ライセンスをまだ人が開いて確認していないことを表す。
+# accessed_on が null のものは、登録時に実際にはアクセスしていない。すべてのエントリは、参照される前に確認日と確認者を補う。
+version: '2026-10-03'
+reviewed_by: 未定
+sources:
+  - id: mext_problem_behavior_survey
+    title: 児童生徒の問題行動・不登校等生徒指導上の諸課題に関する調査
+    publisher: 文部科学省
+    url: https://www.mext.go.jp/
+    year: null
+    accessed_on: null
+    license: 公的統計（出典明記のうえ利用可、要確認）
+    strength: high
+    verified: false
+    notes: いじめの8態様（冷やかし・からかい・悪口、仲間はずれ・無視、軽い暴力、ひどい暴力、金品たかり、金品隠し・破壊、嫌なこと・危険なことの強要、パソコン・携帯電話等での誹謗中傷）の出典。年度と該当表番号は確認時に追記。
+  - id: nier_ijime_tracking
+    title: いじめ追跡調査
+    publisher: 国立教育政策研究所 生徒指導・進路指導研究センター
+    url: https://www.nier.go.jp/
+    year: null
+    accessed_on: null
+    license: 公的資料（要確認）
+    strength: high
+    verified: false
+    notes: 小4〜中3の縦断調査。被害経験の学年推移と「ほとんどの子が被害・加害を経験する」知見の出典。報告書の年版は確認時に追記。
+  - id: ijime_prevention_act
+    title: いじめ防止対策推進法（平成25年法律第71号）
+    publisher: e-Gov 法令検索（デジタル庁）
+    url: https://laws.e-gov.go.jp/
+    year: 2013
+    accessed_on: null
+    license: 法令（自由利用）
+    strength: high
+    verified: false
+    notes: 第2条のいじめの定義（心理的・物理的影響を与える行為で、対象児童が心身の苦痛を感じているもの）。法令 ID は確認時に追記。
+  - id: ijime_basic_policy
+    title: いじめの防止等のための基本的な方針
+    publisher: 文部科学省
+    url: https://www.mext.go.jp/
+    year: null
+    accessed_on: null
+    license: 公的資料（要確認）
+    strength: high
+    verified: false
+    notes: 平成25年策定、平成29年改定。いじめの態様例と「けんかやふざけ合いも背景を調査」の方針。改定版の年を確認時に確定。
+  - id: kodomo_basic_act
+    title: こども基本法（令和4年法律第77号）
+    publisher: e-Gov 法令検索（デジタル庁）
+    url: https://laws.e-gov.go.jp/
+    year: 2022
+    accessed_on: null
+    license: 法令（自由利用）
+    strength: high
+    verified: false
+    notes: こどもの意見表明と最善の利益。本プロダクトの「子ども本人の同意を先に」原則の法的背景。
+  - id: appi
+    title: 個人情報の保護に関する法律（平成15年法律第57号）
+    publisher: e-Gov 法令検索（デジタル庁）
+    url: https://laws.e-gov.go.jp/
+    year: 2003
+    accessed_on: null
+    license: 法令（自由利用）
+    strength: high
+    verified: false
+    notes: 要配慮個人情報と子どもの個人情報の扱い。令和8年改正の反映状況は確認時に確認。
+  - id: cao_national_holidays
+    title: 国民の祝日について
+    publisher: 内閣府
+    url: https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html
+    year: null
+    accessed_on: null
+    license: 公的資料（自由利用、要確認）
+    strength: high
+    verified: false
+    notes: resources/jp_holidays.yaml の出典。春分・秋分の日は前年2月の官報で確定するため、それ以前の年は天文推算値。
+  - id: paper_sketching_silence
+    title: Sketching Silence（子どもの自画像指標によるいじめ被害の早期発見）
+    publisher: PubMed 収録論文
+    url: https://pubmed.ncbi.nlm.nih.gov/41104702/
+    year: null
+    accessed_on: null
+    license: 論文（出版社の利用規約に従う）
+    strength: medium
+    verified: false
+    notes: docs/01-prd.md モジュール1の根拠として引用。D 領域の observe 特徴（自分の大きさ・距離）の背景根拠。著者・誌名は確認時に追記。
+  - id: paper_drawn_stories
+    title: Drawn Stories Technique と Classroom Draw 研究（負の結末と不安・抑うつ）
+    publisher: PubMed Central 収録論文
+    url: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9894026/
+    year: null
+    accessed_on: null
+    license: 論文（PMC 掲載、各論文のライセンスに従う）
+    strength: medium
+    verified: false
+    notes: docs/01-prd.md モジュール1の根拠として引用。D-STORY-001（物語の結末）を score にする根拠。
+  - id: paper_projective_review
+    title: 投射画の証拠整理（反対証拠を含む）
+    publisher: arXiv プレプリント
+    url: https://arxiv.org/pdf/2607.04010
+    year: null
+    accessed_on: null
+    license: プレプリント（arXiv ライセンスに従う）
+    strength: low
+    verified: false
+    notes: docs/01-prd.md モジュール1の根拠として引用。投射画単独での判定は信頼できないという反対証拠。形式特徴を observe に留める根拠。査読状況は確認時に確認。
+  - id: paper_sandplay_review
+    title: 伝統的・デジタル箱庭療法の総説
+    publisher: Frontiers in Psychology
+    url: https://www.frontiersin.org/articles/10.3389/fpsyg.2026.1692537/full
+    year: null
+    accessed_on: null
+    license: 論文（Frontiers は CC BY が多いが要確認）
+    strength: low
+    verified: false
+    notes: docs/01-prd.md モジュール1の根拠として引用。デジタル箱庭の児童での実証研究はまだ無いという指摘。島の幾何特徴を observe に留める根拠。
+  - id: prefectural_checklists
+    title: 各都道府県教育委員会のいじめチェックリスト（仮登録）
+    publisher: 各都道府県教育委員会
+    url: https://www.mext.go.jp/
+    year: null
+    accessed_on: null
+    license: 各教育委員会の規約に従う（要確認）
+    strength: medium
+    verified: false
+    notes: 仮登録。実際に参照した都道府県名、文書名、URL を1件ずつ別エントリとして追加し、この仮登録は削除する。
+  - id: doc_prd
+    title: docs/01-prd.md プロダクト要求仕様書（モジュール1 シグナル体系、D 領域のルール、語彙表 P0）
+    publisher: リポジトリ内のドキュメント
+    url: docs/01-prd.md
+    year: 2026
+    accessed_on: '2026-10-03'
+    license: リポジトリ内部
+    strength: low
+    verified: true
+    notes: 内部の要求仕様書であり、外部のエビデンスではない。これを参照するシグナルには外部の出典を追加する必要がある。
+  - id: doc_agent_architecture
+    title: docs/02-agent-architecture.md Agent アーキテクチャ（シグナル抽出と作品特徴抽出）
+    publisher: リポジトリ内のドキュメント
+    url: docs/02-agent-architecture.md
+    year: 2026
+    accessed_on: '2026-10-03'
+    license: リポジトリ内部
+    strength: low
+    verified: true
+    notes: ルールシグナルの計測値の定義の出典。内部ドキュメントであり、外部のエビデンスではない。
+  - id: doc_backend_workers
+    title: docs/03-database.md データベース定義（表現作品と生活シグナル。signal-worker のルールシグナル）
+    publisher: リポジトリ内のドキュメント
+    url: docs/03-database.md
+    year: 2026
+    accessed_on: '2026-10-03'
+    license: リポジトリ内部
+    strength: low
+    verified: true
+    notes: 作品と島の幾何に関するルールシグナルの出典。内部ドキュメントであり、外部のエビデンスではない。

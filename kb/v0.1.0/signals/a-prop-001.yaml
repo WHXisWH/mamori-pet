@@ -1,0 +1,28 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「金品を隠されたり、盗まれたり、壊されたり、捨てられたりする」。出典の登録は sources/registry.yaml を参照。
+# PRD の L3 は「持ち物を壊された」を明示している。例文は開発用に創作したもので、子どもの実際の記録ではない。
+signal_id: A-PROP-001
+domain: a
+description: 子どもが、自分の持ち物を隠された、盗まれた、壊された、捨てられたと話す（金品隠し・破壊）
+examples_ja:
+  low:
+    - 'ふでばこが かくされた'
+    - 'くつが ごみばこに すててあった'
+    - 'ランドセルに らくがきされた'
+    - 'えんぴつ ぜんぶ おられた'
+  high:
+    - '上靴隠された'
+    - 'ノートに落書きされた'
+    - '教科書破かれた'
+    - '机の中のもの捨てられてた'
+  jhs:
+    - '自転車のタイヤ刺された'
+    - 'スマホ隠されて家に連絡できなかった'
+    - '体操服がトイレに捨てられてた'
+    - 'ロッカーの中ぐちゃぐちゃにされる'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

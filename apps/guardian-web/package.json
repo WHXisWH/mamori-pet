@@ -1,0 +1,31 @@
+{
+  "name": "@ijime/guardian-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "build:local": "node ../../scripts/build-local.mjs --app",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src e2e",
+    "test": "playwright test",
+    "clean": "rm -rf .next test-results playwright-report"
+  },
+  "dependencies": {
+    "@ijime/api-types": "workspace:*",
+    "firebase": "12.19.0",
+    "lucide-react": "0.562.0",
+    "next": "^16.3.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/postcss": "^4.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.0"
+  }
+}

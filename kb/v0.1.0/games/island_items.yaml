@@ -1,0 +1,62 @@
+# DRAFT / 専門家未レビュー
+# 島のアイテムカタログ。出典：docs/01-prd.md モジュール2（ペットの島）、モジュール3（お世話と成長）、docs/05-frontend.md IslandSandbox、RewardReveal、docs/03-database.md island/current.unlockedItems。
+# フィールド：catalogId、category(animal|plant|house|furniture|deco|nature)、label_ja、unlock(default|reward|season:<spring|summer|autumn|winter>)、sprite（packages/ui ISLAND_SPRITES のコンポーネント id）。
+# unlock=default は最初から置ける。reward はペットのお願いを完了したときだけ手に入る（ランダム要素もレア度もない）。season は games/seasons.yaml の対応する季節に解放される。
+# animal カテゴリは rules/island_geometry.yaml の figure_categories でもある。
+items:
+  # animal
+  - { catalogId: rabbit_small, category: animal, label_ja: うさぎ, unlock: default, sprite: rabbit_01 }
+  - { catalogId: bear, category: animal, label_ja: くま, unlock: default, sprite: bear_01 }
+  - { catalogId: fox, category: animal, label_ja: きつね, unlock: default, sprite: fox_01 }
+  - { catalogId: cat, category: animal, label_ja: ねこ, unlock: reward, sprite: cat_01 }
+  - { catalogId: dog, category: animal, label_ja: いぬ, unlock: reward, sprite: dog_01 }
+  - { catalogId: bird, category: animal, label_ja: ことり, unlock: reward, sprite: bird_01 }
+  - { catalogId: turtle, category: animal, label_ja: かめ, unlock: reward, sprite: turtle_01 }
+  - { catalogId: owl_small, category: animal, label_ja: ふくろう, unlock: reward, sprite: owl_01 }
+  - { catalogId: frog, category: animal, label_ja: かえる, unlock: 'season:summer', sprite: frog_01 }
+  - { catalogId: deer, category: animal, label_ja: しか, unlock: 'season:autumn', sprite: deer_01 }
+  - { catalogId: penguin, category: animal, label_ja: ペンギン, unlock: 'season:winter', sprite: penguin_01 }
+  # plant
+  - { catalogId: tree, category: plant, label_ja: き, unlock: default, sprite: tree_01 }
+  - { catalogId: bush, category: plant, label_ja: しげみ, unlock: default, sprite: bush_01 }
+  - { catalogId: flower_red, category: plant, label_ja: あかいはな, unlock: default, sprite: flower_01 }
+  - { catalogId: flower_blue, category: plant, label_ja: あおいはな, unlock: reward, sprite: flower_02 }
+  - { catalogId: mushroom, category: plant, label_ja: きのこ, unlock: reward, sprite: mushroom_01 }
+  - { catalogId: cherry_tree, category: plant, label_ja: さくらのき, unlock: 'season:spring', sprite: cherry_tree_01 }
+  - { catalogId: tulip, category: plant, label_ja: チューリップ, unlock: 'season:spring', sprite: tulip_01 }
+  - { catalogId: sunflower, category: plant, label_ja: ひまわり, unlock: 'season:summer', sprite: sunflower_01 }
+  - { catalogId: maple_tree, category: plant, label_ja: もみじのき, unlock: 'season:autumn', sprite: maple_tree_01 }
+  - { catalogId: pine_tree, category: plant, label_ja: まつのき, unlock: 'season:winter', sprite: pine_tree_01 }
+  # house
+  - { catalogId: house, category: house, label_ja: いえ, unlock: default, sprite: house_01 }
+  - { catalogId: school, category: house, label_ja: がっこう, unlock: default, sprite: school_01 }
+  - { catalogId: tent, category: house, label_ja: テント, unlock: reward, sprite: tent_01 }
+  - { catalogId: treehouse, category: house, label_ja: きのうえのいえ, unlock: reward, sprite: treehouse_01 }
+  - { catalogId: lighthouse, category: house, label_ja: とうだい, unlock: reward, sprite: lighthouse_01 }
+  # furniture
+  - { catalogId: bench, category: furniture, label_ja: ベンチ, unlock: default, sprite: bench_01 }
+  - { catalogId: table_round, category: furniture, label_ja: まるいテーブル, unlock: reward, sprite: table_01 }
+  - { catalogId: swing, category: furniture, label_ja: ブランコ, unlock: reward, sprite: swing_01 }
+  - { catalogId: slide, category: furniture, label_ja: すべりだい, unlock: reward, sprite: slide_01 }
+  - { catalogId: lantern, category: furniture, label_ja: ランプ, unlock: reward, sprite: lantern_01 }
+  - { catalogId: mailbox, category: furniture, label_ja: ポスト, unlock: reward, sprite: mailbox_01 }
+  - { catalogId: bookshelf, category: furniture, label_ja: ほんだな, unlock: reward, sprite: bookshelf_01 }
+  # deco
+  - { catalogId: boat, category: deco, label_ja: ふね, unlock: default, sprite: boat_01 }
+  - { catalogId: flag, category: deco, label_ja: はた, unlock: reward, sprite: flag_01 }
+  - { catalogId: kite, category: deco, label_ja: たこ, unlock: reward, sprite: kite_01 }
+  - { catalogId: balloon, category: deco, label_ja: ふうせん, unlock: reward, sprite: balloon_01 }
+  - { catalogId: picture_frame, category: deco, label_ja: えのがくぶち, unlock: reward, sprite: frame_01 }
+  - { catalogId: windchime, category: deco, label_ja: ふうりん, unlock: 'season:summer', sprite: windchime_01 }
+  - { catalogId: watermelon, category: deco, label_ja: すいか, unlock: 'season:summer', sprite: watermelon_01 }
+  - { catalogId: sports_flag, category: deco, label_ja: うんどうかいのはた, unlock: 'season:autumn', sprite: sports_flag_01 }
+  - { catalogId: bunting, category: deco, label_ja: ぶんかさいのかざり, unlock: 'season:autumn', sprite: bunting_01 }
+  - { catalogId: snowman, category: deco, label_ja: ゆきだるま, unlock: 'season:winter', sprite: snowman_01 }
+  - { catalogId: new_notebook, category: deco, label_ja: あたらしいノート, unlock: 'season:spring', sprite: notebook_01 }
+  # nature
+  - { catalogId: rock, category: nature, label_ja: いわ, unlock: default, sprite: rock_01 }
+  - { catalogId: pond, category: nature, label_ja: いけ, unlock: default, sprite: pond_01 }
+  - { catalogId: hill, category: nature, label_ja: おか, unlock: default, sprite: hill_01 }
+  - { catalogId: cloud_small, category: nature, label_ja: くも, unlock: reward, sprite: cloud_01 }
+  - { catalogId: rainbow, category: nature, label_ja: にじ, unlock: reward, sprite: rainbow_01 }
+  - { catalogId: star_lamp, category: nature, label_ja: ほしのあかり, unlock: reward, sprite: star_01 }

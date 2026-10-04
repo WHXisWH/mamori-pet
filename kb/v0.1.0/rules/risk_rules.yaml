@@ -1,0 +1,41 @@
+# 出典：docs/03-database.md「ナレッジベースとルールの保存」のレベル判定ルールの例。数値は docs/01-prd.md モジュール1のリスクレベル分類に従う
+cold_start_days: 28
+low_weight_domains: [d, k]
+levels:
+  l1: { min_domains: 1, min_days: 7 }
+  l2: { min_domains: 2, min_days: 7 }
+  l3: { min_domains: 3, or_explicit_in: [a, d] }
+  l4: { crisis_detector: true }
+
+# 日次ジョブのレベル判定パラメータ。
+# 数値はすべて専門家レビュー待ち。
+daily:
+  baseline:
+    # 登校日／休みの日ごとに、直近の何暦日分を使うか。ある特徴が逸脱した日は、その特徴のそれ以降のベースラインに入れない
+    # （入れると、続いている逸脱がベースラインに吸収されてしまう）
+    window_days: 28
+    # その日付タイプについて、ウィンドウ内に最低何日分のデータがあればベースラインを作るか
+    min_points: 4
+  deviation:
+    # 悪化の方向に「中央値 ± k × 四分位範囲」を超えたら逸脱とする
+    iqr_k: 1.5
+  persistence:
+    # 連続逸脱日数を数えるときにさかのぼる日数
+    lookback_days: 21
+    # データがこの日数だけ連続して欠けたら連続を打ち切る（1日欠けても打ち切らず、3日欠けたら打ち切る）
+    break_after_missing_days: 3
+  # コンテキスト情報の期間内の逸脱は、カテゴリに応じて1日未満に換算する。ここにない領域は1日として数える
+  context_weights:
+    exam: { a: 0.5, m: 0.5 }
+    school_event: { a: 0.5, m: 0.5, i: 0.5 }
+    sick: { a: 0.5, v: 0.5, m: 0.5, i: 0.5 }
+    travel: { i: 0.5 }
+    class_change: { a: 0.5, m: 0.5 }
+  # これらのコンテキスト情報の期間内の日は、休みの日としてベースラインを取る
+  rest_day_contexts: [long_vacation]
+  # L2：直近 window_days 日のうち、この特徴が 0 より大きい日が min_days 日以上
+  school_avoidance: { feature: a_school_avoid_count, window_days: 7, min_days: 3 }
+  # レベルが下がるときも、L3 は少なくとも相談に回答があるまで維持する
+  hold_l3_until_consultation_resolved: true
+  # ML.DETECT_ANOMALIES のしきい値（第二の判定基準。anomalies テーブルに書くだけで、レベル判定には使わない）
+  anomaly_prob_threshold: 0.95

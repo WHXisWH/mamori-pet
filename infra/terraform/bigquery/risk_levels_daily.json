@@ -1,0 +1,7 @@
+[
+  { "name": "pseudo_id", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "date", "type": "DATE", "mode": "REQUIRED" },
+  { "name": "level", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "domains_flagged", "type": "STRING", "mode": "REPEATED" },
+  { "name": "rules_version", "type": "STRING", "mode": "REQUIRED" }
+]

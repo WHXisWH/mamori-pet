@@ -1,0 +1,23 @@
+{
+  "hosting": {
+    "site": "mamori",
+    "public": "public",
+    "ignore": ["**/.*"],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+          { "key": "Permissions-Policy", "value": "camera=(), geolocation=(), microphone=()" }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": { "serviceId": "landing-web", "region": "asia-northeast1" }
+      }
+    ]
+  }
+}

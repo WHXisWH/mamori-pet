@@ -1,0 +1,29 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「金品をたかられる」。出典の登録は sources/registry.yaml を参照。
+# PRD の L3 は「お金を要求されたと話す」を明示している。現在進行中の恐喝は L4 に当たり、これらの表現は lexicon/ja.yaml の extortion にも登録して、危機検知が先に処理する。
+# 例文は開発用に創作したもので、子どもの実際の記録ではない。
+signal_id: A-EXTORT-001
+domain: a
+description: 子どもが、金品を要求された、おごらされた、物を買わされたと話す（金品たかり）
+examples_ja:
+  low:
+    - 'おかねを ちょうだいって いわれる'
+    - 'おやつを ぜんぶ とられた'
+    - 'カードを あげないと あそばないって いわれた'
+    - 'おこづかい もってこいって いわれた'
+  high:
+    - 'お金取られた'
+    - 'ジュースおごらされた'
+    - '貸してって言われて返してくれない'
+    - 'ゲームの課金代払えって言われる'
+  jhs:
+    - 'カツアゲされた'
+    - '毎週千円持ってこいって言われる'
+    - 'おごるのが当たり前になってる'
+    - '金出さないと殴るって言われた'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

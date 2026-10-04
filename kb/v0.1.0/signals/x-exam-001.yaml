@@ -1,0 +1,15 @@
+# DRAFT / 専門家未レビュー
+# コンテキスト情報のシグナル（X 領域）。calendar-sync が rules/context_keywords.yaml に従ってカレンダーの予定名を分類し、risk-engine の contextFeatures が x_{category}_flag を出力する（services/risk-engine/src/daily/features.ts）。
+# モデルには渡さない。rules/risk_rules.yaml の context_weights としてほかの領域の重みを調整するだけで、単独では逸脱にならない。出典の登録は sources/registry.yaml を参照。
+signal_id: X-EXAM-001
+domain: x
+description: その日が試験の時期に当たる（テスト・試験・模試・受験）。値は 1
+examples_ja: []
+grade_bands: [low, high, jhs]
+explicit: false
+method: rule
+metric: x_exam_flag
+evidence:
+  sources: [doc_backend_workers, doc_prd]
+  strength: low
+reviewed_by: 未定

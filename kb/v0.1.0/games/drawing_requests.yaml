@@ -1,0 +1,136 @@
+# DRAFT / 専門家未レビュー
+# ペットのお願い「絵をかざる」のお題。出典：docs/01-prd.md モジュール3（ペットのお願い：絵をかざる、お絵かきと箱庭のミニゲームの原則）、docs/05-frontend.md PetRequestCard、DrawingCanvas、RewardReveal。
+# お題は中立的なものを中心にする（neutral: true）。「だれと」系のお題は最大3件（neutral: false）で、ペット Agent が低い頻度で出す。テストのような口調にせず、「いまの自分を描いて」のようなお題は出さない。
+# ペットは絵を受け取ったら「これはだれ？」「そのあとどうなったの？」と興味をもって聞くだけで、解釈や上手下手の評価はしない（言い回しは prompts/ と skills/play-expression.md にある）。
+# 文言は開発用に創作したもので、子どもの実際の記録ではない。reward_item は games/island_items.yaml の catalogId（unlock: reward）を参照する。
+items:
+  # 好きな食べ物
+  - id: dr_food_low
+    grade_bands: [low]
+    text_ja: すきな たべものを かいて、おへやに かけたいな。
+    neutral: true
+    reward_item: table_round
+  - id: dr_food_high
+    grade_bands: [high]
+    text_ja: 好きな食べ物の絵、へやにかけたいな。かいてくれる？
+    neutral: true
+    reward_item: table_round
+  - id: dr_food_jhs
+    grade_bands: [jhs]
+    text_ja: 好きな食べ物を描いてほしい。部屋に飾りたいんだ。
+    neutral: true
+    reward_item: table_round
+  # 週末にしたいこと
+  - id: dr_weekend_low
+    grade_bands: [low]
+    text_ja: おやすみの ひに したいことを かいてみて。
+    neutral: true
+    reward_item: kite
+  - id: dr_weekend_high
+    grade_bands: [high]
+    text_ja: 週末にしたいこと、絵にしてみない？
+    neutral: true
+    reward_item: kite
+  - id: dr_weekend_jhs
+    grade_bands: [jhs]
+    text_ja: 週末にやりたいことを一枚描いてほしい。どんな休みでもいい。
+    neutral: true
+    reward_item: kite
+  # ペットの新しい帽子
+  - id: dr_hat_low
+    grade_bands: [low]
+    text_ja: あたらしい ぼうしが ほしいな。どんな ぼうしが いいか かいて？
+    neutral: true
+    reward_item: flag
+  - id: dr_hat_high
+    grade_bands: [high]
+    text_ja: 新しいぼうしをデザインしてほしいな。どんな形でも色でも。
+    neutral: true
+    reward_item: flag
+  - id: dr_hat_jhs
+    grade_bands: [jhs]
+    text_ja: 新しい帽子をデザインしてくれない？気に入ったのをかぶりたい。
+    neutral: true
+    reward_item: flag
+  # 島に増やしたいもの
+  - id: dr_island_low
+    grade_bands: [low]
+    text_ja: この しまに あったら いいなと おもう ものを かいて。
+    neutral: true
+    reward_item: lantern
+  - id: dr_island_high
+    grade_bands: [high]
+    text_ja: この島に増やしたいもの、絵でおしえて。
+    neutral: true
+    reward_item: lantern
+  - id: dr_island_jhs
+    grade_bands: [jhs]
+    text_ja: この島に足したいものを描いてほしい。実在しなくてもいい。
+    neutral: true
+    reward_item: lantern
+  # 好きな動物・生きもの
+  - id: dr_animal_low
+    grade_bands: [low]
+    text_ja: すきな どうぶつを かいてみて。おへやに かけるよ。
+    neutral: true
+    reward_item: bird
+  - id: dr_animal_high
+    grade_bands: [high, jhs]
+    text_ja: 好きな生きものを一匹、描いてくれる？
+    neutral: true
+    reward_item: bird
+  # 行ってみたい場所
+  - id: dr_place_low
+    grade_bands: [low]
+    text_ja: いってみたい ところを かいて。うみでも そらでも。
+    neutral: true
+    reward_item: balloon
+  - id: dr_place_high
+    grade_bands: [high]
+    text_ja: 行ってみたい場所の絵、かいてほしいな。
+    neutral: true
+    reward_item: balloon
+  - id: dr_place_jhs
+    grade_bands: [jhs]
+    text_ja: 行ってみたい場所を描いてほしい。地図にないところでも。
+    neutral: true
+    reward_item: balloon
+  # 今日の空・好きな天気
+  - id: dr_sky_all
+    grade_bands: [low, high, jhs]
+    text_ja: すきな てんきの そらを かいてみて。
+    neutral: true
+    reward_item: cloud_small
+  # 宝もの
+  - id: dr_treasure_low
+    grade_bands: [low]
+    text_ja: たからものを ひとつ かいてみて。
+    neutral: true
+    reward_item: picture_frame
+  - id: dr_treasure_high
+    grade_bands: [high, jhs]
+    text_ja: 大事にしているものを一つ、描いてほしい。
+    neutral: true
+    reward_item: picture_frame
+  # 乗りもの
+  - id: dr_vehicle_all
+    grade_bands: [low, high]
+    text_ja: のってみたい のりものを かいて。
+    neutral: true
+    reward_item: lighthouse
+  # 中立でないお題（「だれと」系、最大3件）
+  - id: dr_with_low
+    grade_bands: [low]
+    text_ja: だれかと あそんでいる えを かいてみて。どうぶつでも いいよ。
+    neutral: false
+    reward_item: swing
+  - id: dr_with_high
+    grade_bands: [high]
+    text_ja: だれかといっしょに何かしている絵、かいてくれる？
+    neutral: false
+    reward_item: swing
+  - id: dr_with_jhs
+    grade_bands: [jhs]
+    text_ja: 誰かと一緒にいる場面を描いてほしい。誰でも、何をしていてもいい。
+    neutral: false
+    reward_item: swing

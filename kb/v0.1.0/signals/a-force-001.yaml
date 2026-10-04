@@ -1,0 +1,28 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「嫌なことや恥ずかしいこと、危険なことをされたり、させられたりする」。出典の登録は sources/registry.yaml を参照。
+# 例文は開発用に創作したもので、子どもの実際の記録ではない。
+signal_id: A-FORCE-001
+domain: a
+description: 子どもが、嫌なこと・恥ずかしいこと・危険なことを無理にさせられたと話す（嫌なこと・恥ずかしいこと・危険なことの強要）
+examples_ja:
+  low:
+    - 'いやって いっても やめてくれない'
+    - 'ズボン おろされた'
+    - 'みんなの まえで うたわされた'
+    - 'たかいところから とべって いわれた'
+  high:
+    - '無理やり変なこと言わされる'
+    - 'パンツ見せろって言われた'
+    - '万引きしてこいって言われた'
+    - '罰ゲームっていつも私だけ'
+  jhs:
+    - '一発芸やらされて動画撮られた'
+    - '告白しろって無理やりやらされた'
+    - '先輩の荷物持ちが当たり前になってる'
+    - '裸の写真送れって言われた'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

@@ -1,0 +1,252 @@
+# DRAFT / 専門家未レビュー
+# 日本語表現の語彙表。出典：docs/01-prd.md モジュール1の日本語表現の語彙表（P0 の6分類）。出典の登録は sources/registry.yaml（mext_problem_behavior_survey、doc_prd）を参照。
+# 日本の子どものサンプルではまだ検証していない。パイロットのデータと専門家のラベル付けで調整する必要がある。表現はすべて開発用に創作したもので、子どもの実際の記録ではない。
+# フィールド：explicit は、その分類の表現が「子どもが被害の経験を明確に話す」（PRD L3）に当たるかどうか。grade_bands は出現を想定する学年帯。
+# id が crisis の分類だけが packages/crisis-detector のキーワード層に入る。一致したらすべて危機として扱うため、crisis には誤検知しにくい完全な表現だけを置く
+# （単独の「切りたい」「OD」「自殺」のように、「髪切りたい」「自殺のニュース」にも一致する短い語は置かない）。ほかの分類はキーワード層に入らない。
+# kb-loader はすべての表現を NFKC 正規化してから重複を調べる。同じ表現が2回出てくると kb:check が失敗する。
+language: ja
+categories:
+  - id: avoidance
+    label_ja: 話題回避
+    handling: domain_a_deviation
+    explicit: false
+    grade_bands: [low, high, jhs]
+    expressions: ['別に', '普通', 'なんでもない', 'べつに', 'ふつう', 'わからない', 'いいから', 'もういい']
+  - id: exclusion
+    label_ja: 仲間はずれ・無視
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    expressions:
+      - 'ハブられた'
+      - '無視される'
+      - '既読スルーされる'
+      - 'ぼっち'
+      - 'なかまはずれ'
+      - '仲間はずれ'
+      - 'なかまにいれてくれない'
+      - 'むしされる'
+      - 'シカトされた'
+      - 'いれてくれない'
+      - 'よばれなかった'
+      - '誘われない'
+      - '私だけ誘われない'
+      - '俺だけ呼ばれない'
+      - 'いつも余る'
+  - id: teasing
+    label_ja: 冷やかし・からかい・悪口
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    notes: 「死ね」は相手に向けられた暴言としてここに置く。自傷の表現ではないので crisis には入れない。
+    expressions:
+      - 'バカにされる'
+      - 'ばかにされる'
+      - 'からかわれる'
+      - 'わらわれた'
+      - '笑われた'
+      - 'あだ名で呼ばれる'
+      - 'へんなあだな'
+      - 'キモいって言われる'
+      - 'きもいっていわれた'
+      - 'ウザいって言われる'
+      - '死ねって言われた'
+      - 'しねっていわれた'
+      - '悪口言われる'
+      - 'わるぐちいわれた'
+      - 'いじられる'
+      - 'ネタにされる'
+  - id: violence
+    label_ja: 暴力
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    notes: 進行中の暴力は PRD の L4。判定はモデルの危機スクリーニングと再確認が行い、この分類の語はキーワード層に入れない。
+    expressions:
+      - '殴られた'
+      - 'なぐられた'
+      - '蹴られた'
+      - 'けられた'
+      - '叩かれた'
+      - 'たたかれた'
+      - 'ボコられた'
+      - '突き飛ばされた'
+      - 'つきとばされた'
+      - '押された'
+      - '首しめられた'
+      - '腹パン'
+      - 'アザができた'
+      - 'プロレスごっこ'
+      - '遊びって言いながら'
+  - id: extortion
+    label_ja: 恐喝・金品たかり
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    notes: 進行中の恐喝は PRD の L4。判定はモデルが行う。
+    expressions:
+      - 'お金取られた'
+      - 'おかねとられた'
+      - 'カツアゲ'
+      - 'おごらされた'
+      - 'おごれって言われ'
+      - '金持ってこい'
+      - 'おかねもってこい'
+      - 'たかられる'
+      - '返してくれない'
+      - '課金代払え'
+      - 'おやつとられた'
+  - id: property
+    label_ja: 金品隠し・破壊
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    expressions:
+      - '隠された'
+      - 'かくされた'
+      - '壊された'
+      - 'こわされた'
+      - '捨てられた'
+      - 'すてられた'
+      - '盗まれた'
+      - 'ぬすまれた'
+      - '落書きされた'
+      - 'らくがきされた'
+      - '破かれた'
+      - '上靴がない'
+      - 'くつがない'
+  - id: forced
+    label_ja: 嫌なこと・危険なことの強要
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    expressions:
+      - '無理やりやらされ'
+      - 'むりやり'
+      - 'いやって言ってもやめてくれない'
+      - 'いやっていってもやめない'
+      - 'ズボンおろされた'
+      - 'パンツ見せろ'
+      - '罰ゲームっていつも'
+      - '万引きしてこい'
+      - '動画撮られた'
+      - '写真送れ'
+  - id: cyber
+    label_ja: ネットでの誹謗中傷
+    handling: l3_candidate_after_pet_confirmation
+    explicit: true
+    grade_bands: [low, high, jhs]
+    expressions:
+      - '悪口書かれた'
+      - 'わるぐちかかれた'
+      - '晒された'
+      - 'さらされた'
+      - 'グループ外された'
+      - 'グループから外された'
+      - 'グループからぬかれた'
+      - '既読無視'
+      - '既読スルー'
+      - '裏アカ'
+      - 'ブロックされた'
+      - 'キックされた'
+      - '勝手に写真'
+      - 'スクショ回された'
+      - '誹謗中傷'
+      - 'チャットでばかって'
+  - id: school_avoidance
+    label_ja: 登校回避
+    handling: domain_a_school_avoidance
+    explicit: false
+    grade_bands: [low, high, jhs]
+    expressions:
+      - '学校行きたくない'
+      - 'がっこういきたくない'
+      - '学校やめたい'
+      - '休みたい'
+      - 'やすみたい'
+      - '教室に入れない'
+  - id: self_negation
+    label_ja: 自己否定
+    handling: domain_a
+    explicit: false
+    grade_bands: [low, high, jhs]
+    expressions:
+      - 'どうせ私なんか'
+      - '僕が悪い'
+      - 'ぼくがわるい'
+      - 'わたしがわるい'
+      - '自分のせい'
+      - 'じぶんのせい'
+      - '私なんていなくても'
+      - '役立たず'
+  - id: absolutes
+    label_ja: 絶対化
+    handling: weight_only
+    explicit: false
+    grade_bands: [low, high, jhs]
+    expressions: ['いつも', '誰も', '絶対', 'だれも', 'ぜったい', 'みんな', '毎日']
+  - id: somatic
+    label_ja: 身体化
+    handling: combine_with_calendar_context
+    explicit: false
+    grade_bands: [low, high, jhs]
+    expressions:
+      - 'お腹痛い'
+      - '頭痛い'
+      - 'おなかいたい'
+      - 'あたまいたい'
+      - '気持ち悪い'
+      - 'きもちわるい'
+      - '朝起きられない'
+      - '吐きそう'
+  - id: net_slang
+    label_ja: ネット用語・若者言葉（気分の目安）
+    handling: tone_only_not_crisis
+    explicit: false
+    grade_bands: [high, jhs]
+    notes: 落ち込みの強調語。危機ではないので crisis に入れない。モデルの文脈判断の参考用。
+    expressions:
+      - 'メンブレ'
+      - '病んだ'
+      - '病む'
+      - 'しんどい'
+      - '無理ゲー'
+      - '詰んだ'
+      - 'オワタ'
+      - 'ぴえん'
+      - 'つらたん'
+      - 'ガチで'
+      - 'マジで'
+      - 'もう無理'
+  - id: crisis
+    label_ja: 危機
+    handling: l4_review
+    explicit: true
+    grade_bands: [low, high, jhs]
+    notes: この分類だけが crisis-detector のキーワード層に入る。一致したものはすべて危機として扱うため、誤検知しやすい短い語は入れない。追加・変更のときは危機検知のテストと評価セットで確認する。「きえたい」は packages/crisis-detector/src/model.test.ts がヒットしない入力例として使っているため、そのテストを直してから追加する。
+    expressions:
+      - '死にたい'
+      - '消えたい'
+      - 'いなくなりたい'
+      - 'しにたい'
+      - '死んでしまいたい'
+      - '消えてしまいたい'
+      - '消えてなくなりたい'
+      - 'もう生きたくない'
+      - '生きてる意味ない'
+      - '生まれてこなければよかった'
+      - '自殺したい'
+      - '自殺しようと'
+      - '飛び降りたい'
+      - '首を吊りたい'
+      - 'リスカ'
+      - 'リストカット'
+      - '手首切りたい'
+      - '手首切った'
+      - '手首を切った'
+      - '自分を傷つけたい'
+      - '自分を切りたい'
+      - 'ODした'
+      - 'ODしたい'
+      - 'オーバードーズ'

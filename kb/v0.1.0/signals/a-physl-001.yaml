@@ -1,0 +1,28 @@
+# DRAFT / 専門家未レビュー
+# 文科省調査の態様「軽くぶつかられたり、遊ぶふりをして叩かれたり、蹴られたりする」。出典の登録は sources/registry.yaml を参照。
+# 例文は開発用に創作したもので、子どもの実際の記録ではない。
+signal_id: A-PHYSL-001
+domain: a
+description: 子どもが、軽く押された、遊びのふりをして叩かれた・蹴られたと話す（軽い暴力・遊ぶふり）
+examples_ja:
+  low:
+    - 'あそびって いって たたかれる'
+    - 'わざと どんって される'
+    - 'プロレスごっこで ぼくだけ まけるやく'
+    - 'けられるけど じょうだんだって いわれる'
+  high:
+    - 'ふざけてるふりして叩かれる'
+    - 'すれ違うたびに肩ぶつけられる'
+    - '遊びって言いながら蹴ってくる'
+    - 'いつもプロレスの技かけられる'
+  jhs:
+    - 'ノリで殴られるのが毎日'
+    - 'じゃれてるつもりらしいけど普通に痛い'
+    - '通るたびにわざと肩当てられる'
+    - '遊びってことにされてるけど一方的'
+grade_bands: [low, high, jhs]
+explicit: true
+evidence:
+  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  strength: medium
+reviewed_by: 未定

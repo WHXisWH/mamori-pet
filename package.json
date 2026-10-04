@@ -1,0 +1,46 @@
+{
+  "name": "mamori-pet",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "dev:local": "node scripts/dev-local.mjs",
+    "dev:manual": "node scripts/dev-local.mjs --manual",
+    "dev:reset": "node scripts/reset-local.mjs",
+    "build:local": "node scripts/build-local.mjs",
+    "test:local-config": "node --test scripts/local-ports.test.mjs",
+    "test:e2e": "pnpm --filter @ijime/child-web exec playwright test",
+    "eval:crisis": "node scripts/eval-crisis.mjs",
+    "smoke:google": "node scripts/smoke-google.mjs",
+    "test:google-smoke": "node --test scripts/smoke-google.test.mjs",
+    "verify:business": "node scripts/verify-real-business.mjs",
+    "smoke:live": "node scripts/smoke-live.mjs",
+    "smoke:rag": "node scripts/smoke-rag.mjs",
+    "test:real-probes": "node --experimental-strip-types --test scripts/verify-real-business.test.mjs scripts/smoke-live.test.mjs scripts/smoke-rag.test.mjs",
+    "smoke:gemini-developer": "node scripts/smoke-gemini-developer.mjs",
+    "test:gemini-developer": "node --test scripts/smoke-gemini-developer.test.mjs",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint && prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write .",
+    "clean": "turbo run clean && rm -rf node_modules/.cache",
+    "kb:manifest": "pnpm --filter @ijime/kb-loader build && node packages/kb-loader/dist/cli.js kb/v0.1.0",
+    "kb:check": "node packages/kb-loader/dist/cli.js kb/v0.1.0 --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.19.0",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.6.0",
+    "turbo": "^2.11.5",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^4.0.0"
+  }
+}

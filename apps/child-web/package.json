@@ -1,0 +1,41 @@
+{
+  "name": "@ijime/child-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/gen-kb.mjs && next dev -p 3000",
+    "build": "node scripts/gen-kb.mjs && next build",
+    "build:local": "node scripts/gen-kb.mjs && node ../../scripts/build-local.mjs --app",
+    "start": "next start -p 3000",
+    "typecheck": "node scripts/gen-kb.mjs && tsc --noEmit",
+    "lint": "eslint src e2e scripts",
+    "test": "vitest run && playwright test",
+    "clean": "rm -rf .next test-results playwright-report",
+    "gen": "node scripts/gen-kb.mjs"
+  },
+  "dependencies": {
+    "@ijime/config": "workspace:*",
+    "firebase": "12.19.0",
+    "@ijime/api-types": "workspace:*",
+    "@ijime/kb-loader": "workspace:*",
+    "@ijime/ui": "workspace:*",
+    "lucide-react": "0.562.0",
+    "next": "^16.3.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "yaml": "^2.8.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/postcss": "^4.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.0",
+    "@testing-library/react": "^16.3.0",
+    "jsdom": "^27.0.0",
+    "vitest": "^4.0.0",
+    "firebase-tools": "^15.32.0"
+  }
+}

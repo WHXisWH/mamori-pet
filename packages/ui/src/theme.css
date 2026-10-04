@@ -1,0 +1,154 @@
+@theme {
+  --color-cream: #fff8f0;
+  --color-cream-deep: #f6ead9;
+  --color-ink: #3b3a36;
+  --color-ink-soft: #6f6b63;
+  --color-calm: #6b9ac4;
+  --color-calm-deep: #3d6f9e;
+  --color-calm-soft: #dbe7f3;
+  --color-leaf: #7fb77e;
+  --color-leaf-deep: #4f8a4e;
+  --color-sun: #f4c95d;
+  --color-blush: #f7b8c4;
+
+  --color-moko: #fbe9ec;
+  --color-moko-deep: #f2b8c6;
+  --color-pokke: #f6a96b;
+  --color-pokke-deep: #d97b3a;
+  --color-togemaru: #8a5a3c;
+  --color-togemaru-deep: #f3c96b;
+  --color-nami: #2f5f8f;
+  --color-nami-deep: #9fd9c8;
+  --color-hoshi: #2b3557;
+  --color-hoshi-deep: #f1c76b;
+  --color-hidden: #efe6d6;
+  --color-hidden-deep: #c9b8d9;
+
+  --color-night: #1f2233;
+  --color-night-soft: #2c3150;
+
+  --font-sans:
+    'Hiragino Maru Gothic ProN', 'BIZ UDPGothic', 'Zen Maru Gothic', 'Yu Gothic', system-ui,
+    sans-serif;
+  --font-display:
+    'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'BIZ UDPGothic', system-ui, sans-serif;
+
+  --radius-bubble: 1.75rem;
+  --radius-card: 1.5rem;
+
+  --shadow-soft: 0 8px 24px rgb(59 58 54 / 0.08);
+  --shadow-lift: 0 16px 40px rgb(59 58 54 / 0.14);
+
+  --animate-blink: pet-blink 5.2s infinite;
+  --animate-bob: pet-bob 4s ease-in-out infinite;
+  --animate-float: pet-float 6s ease-in-out infinite;
+  --animate-pop: pet-pop 320ms cubic-bezier(0.2, 0.9, 0.3, 1.3);
+  --animate-fade-up: fade-up 600ms ease-out both;
+  --animate-twinkle: twinkle 2.4s ease-in-out infinite;
+
+  @keyframes pet-blink {
+    0%,
+    92%,
+    100% {
+      transform: scaleY(1);
+    }
+    95% {
+      transform: scaleY(0.08);
+    }
+  }
+  @keyframes pet-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-4px);
+    }
+  }
+  @keyframes pet-float {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-1deg);
+    }
+    50% {
+      transform: translateY(-10px) rotate(1deg);
+    }
+  }
+  @keyframes pet-pop {
+    from {
+      transform: scale(0.6);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      transform: translateY(16px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes twinkle {
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: scale(0.8);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+  }
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background: var(--color-cream);
+    color: var(--color-ink);
+    -webkit-tap-highlight-color: transparent;
+  }
+  html[data-grade='low'] {
+    font-size: 20px;
+  }
+  html[data-grade='high'] {
+    font-size: 18px;
+  }
+  html[data-grade='jhs'] {
+    font-size: 16px;
+  }
+  html[data-night='true'] {
+    background: var(--color-night);
+    color: #e9e6df;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility tap-target {
+  min-height: var(--tap-size, 48px);
+  min-width: var(--tap-size, 48px);
+}
+
+@utility grade-tap {
+  --tap-size: 48px;
+  html[data-grade='low'] & {
+    --tap-size: 56px;
+  }
+  html[data-grade='jhs'] & {
+    --tap-size: 44px;
+  }
+}

@@ -1,0 +1,14 @@
+# ルールシグナル（コードで計算し、モデルには渡さない）。出典：docs/03-database.md islandScenes.features。value は 1 固定で、元の計測値は metric に書く。専門家レビュー待ち。出典の登録は sources/registry.yaml を参照。
+signal_id: D-ISLCTR-001
+domain: d
+description: 島での自分と画面中心との距離（相対座標）
+examples_ja: []
+grade_bands: [low, high, jhs]
+explicit: false
+method: rule
+scoring: observe
+metric: d_island_center_dist
+evidence:
+  sources: [doc_backend_workers]
+  strength: low
+reviewed_by: 未定

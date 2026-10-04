@@ -1,0 +1,35 @@
+{
+  "name": "@ijime/notifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "通知文の作成と送信",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "lint": "eslint src",
+    "test": "firebase --config firebase.json emulators:exec --only firestore --project demo-ijime \"vitest run\"",
+    "start": "node dist/index.js",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@google-cloud/bigquery": "^9.1.0",
+    "@google-cloud/firestore": "^9.2.0",
+    "@google/adk": "^2.1.0",
+    "@ijime/agent-core": "workspace:*",
+    "@ijime/api-types": "workspace:*",
+    "@ijime/config": "workspace:*",
+    "@ijime/kb-loader": "workspace:*",
+    "@ijime/service-kit": "workspace:*",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@ijime/api": "workspace:*",
+    "@ijime/risk-engine": "workspace:*",
+    "firebase-tools": "^15.32.0"
+  },
+  "exports": {
+    "./src/*": "./src/*"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@ijime/service-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@ijime/api-types": "workspace:*",
+    "@ijime/config": "workspace:*",
+    "google-auth-library": "^10.9.1",
+    "hono": "^4.10.0",
+    "zod": "^4.2.1"
+  }
+}

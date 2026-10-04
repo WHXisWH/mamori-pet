@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "いじめ対策デジタルペット — 全体アーキテクチャ",
+    "subtitle": "Cloud Run サービス 7 個 · Google ADK のペット Agent · すべて asia-northeast1 に配置",
+    "output": "architecture.html"
+  },
+  "components": [
+    { "id": "child", "type": "frontend", "label": "子ども側 PWA", "sublabel": "child-web", "pos": [40, 150], "size": [130, 60] },
+    { "id": "guardian", "type": "frontend", "label": "保護者側 PWA", "sublabel": "guardian-web", "pos": [40, 600], "size": [130, 60] },
+
+    { "id": "voice", "type": "backend", "label": "voice-relay", "sublabel": "WebSocket · runLive", "tag": "外部公開", "pos": [300, 40], "size": [150, 60] },
+    { "id": "crisis", "type": "security", "label": "危機検知", "sublabel": "キーワード→Flash→Pro", "tag": "共有ライブラリ", "pos": [300, 150], "size": [150, 60] },
+    { "id": "api", "type": "backend", "label": "api", "sublabel": "REST + SSE", "tag": "外部公開", "pos": [300, 260], "size": [150, 60] },
+
+    { "id": "gemini", "type": "cloud", "label": "Gemini", "sublabel": "Agent Platform 東京", "tag": "Flash / Pro / Live", "pos": [790, 40], "size": [160, 60] },
+    { "id": "pet", "type": "backend", "label": "pet-agent", "sublabel": "ADK runAsync", "tag": "ペット LlmAgent", "pos": [790, 260], "size": [160, 60] },
+
+    { "id": "pubsub", "type": "messagebus", "label": "Pub/Sub", "sublabel": "8 トピック + デッドレター", "pos": [300, 440], "size": [150, 50] },
+    { "id": "signal", "type": "backend", "label": "signal-worker", "sublabel": "シグナル/作品特徴", "pos": [540, 440], "size": [150, 60] },
+    { "id": "risk", "type": "backend", "label": "risk-engine", "sublabel": "ルール + BQML", "tag": "レベル判定はここだけ", "pos": [790, 440], "size": [160, 60] },
+    { "id": "notifier", "type": "backend", "label": "notifier", "sublabel": "通知文の作成 + 送信", "pos": [1060, 440], "size": [140, 60] },
+    { "id": "calendar", "type": "backend", "label": "calendar-sync", "sublabel": "カレンダー連携 Job", "pos": [790, 600], "size": [160, 60] },
+
+    { "id": "firestore", "type": "database", "label": "Firestore", "sublabel": "暗号化した業務データ", "pos": [300, 780], "size": [150, 60] },
+    { "id": "kms", "type": "security", "label": "Cloud KMS", "sublabel": "エンベロープ暗号化", "pos": [540, 780], "size": [150, 60] },
+    { "id": "gcs", "type": "database", "label": "Cloud Storage", "sublabel": "作品 · kb バージョン", "pos": [790, 780], "size": [160, 60] },
+    { "id": "bq", "type": "database", "label": "BigQuery", "sublabel": "非識別化した特徴", "pos": [1060, 780], "size": [140, 60] }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "GCP asia-northeast1（東京）",
+      "wraps": ["voice", "crisis", "api", "gemini", "pet", "pubsub", "signal", "risk", "notifier", "calendar", "firestore", "kms", "gcs", "bq"]
+    }
+  ],
+  "connections": [
+    { "from": "child", "to": "voice", "label": "WSS 音声", "fromSide": "top", "toSide": "left", "route": "orthogonal-v" },
+    { "from": "child", "to": "api", "label": "HTTPS", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "orthogonal-h" },
+    { "from": "guardian", "to": "api", "label": "HTTPS", "fromSide": "top", "toSide": "left", "route": "orthogonal-v" },
+
+    { "from": "voice", "to": "crisis", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "from": "api", "to": "crisis", "variant": "security", "fromSide": "top", "toSide": "bottom" },
+
+    { "from": "api", "to": "pet", "label": "検知なしのときだけ呼び出す", "variant": "emphasis" },
+    { "from": "pet", "to": "gemini", "label": "runAsync", "variant": "emphasis", "fromSide": "top", "toSide": "bottom" },
+    { "from": "voice", "to": "gemini", "label": "Live API" },
+
+    { "from": "api", "to": "pubsub", "label": "イベントは ID のみ", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelAt": [420, 380] },
+    { "from": "pubsub", "to": "signal", "variant": "dashed" },
+    { "from": "signal", "to": "risk", "variant": "dashed" },
+    { "from": "risk", "to": "notifier", "label": "相談のあと", "variant": "dashed" },
+    { "from": "pubsub", "to": "notifier", "label": "crisis.detected（L4 は即時）", "variant": "security", "fromSide": "bottom", "toSide": "bottom", "via": [[375, 540], [1130, 540]] },
+    { "from": "notifier", "to": "guardian", "label": "通知（原文を含まない）", "fromSide": "right", "toSide": "bottom", "via": [[1250, 470], [1250, 710], [105, 710]] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "リアルタイム経路", "items": ["すべての入力はまず危機検知を通し、そのあとペット Agent に渡す", "検知したら直ちに L4 セーフモードに入り、定型文で応える", "ペットの応答は SSE（テキスト）または音声で子ども側に返す", "音声モードのツール呼び出しは pet-agent に転送して実行する"] },
+    { "dot": "violet", "title": "非同期経路", "items": ["シグナル抽出 → 日次の特徴を BigQuery に書き込む", "risk-engine は毎日 02:00（Scheduler）と、明確な発言があったときに即時実行", "L2/L3 はまずペットが子どもと相談し、そのあと通知するかを決める", "calendar-sync が試験や長期休みなどのコンテキスト情報を渡し、重みを下げる"] },
+    { "dot": "rose", "title": "安全上の必須制約（Agent の外側）", "items": ["リスクレベルは risk-engine だけが決定論的に計算する", "保護者側には原文・リスクレベル・作品の解釈を返さない", "原文と記憶は KMS でエンベロープ暗号化する", "ログとイベントには子どもが入力した文字を含めない"] }
+  ]
+}

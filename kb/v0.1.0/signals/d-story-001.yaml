@@ -1,0 +1,13 @@
+# ルールシグナル（コードで計算し、モデルには渡さない）。value は 1 固定で、元の計測値は metric に書く。専門家レビュー待ち。出典の登録は sources/registry.yaml を参照。
+signal_id: D-STORY-001
+domain: d
+description: おはなしの絵または島の語りの結末が否定的かどうか（negative は 1、positive/compensated は 0、unclear は記録しない）
+examples_ja: []
+grade_bands: [low, high, jhs]
+explicit: false
+method: rule
+metric: d_story_negative
+evidence:
+  sources: [doc_backend_workers]
+  strength: low
+reviewed_by: 未定

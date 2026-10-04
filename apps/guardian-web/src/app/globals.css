@@ -1,0 +1,15 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-paper: #f7f7f5;
+  --color-ink: #2b2b2b;
+  --color-calm: #3d6f9e;
+  --color-alert: #b3261e;
+  --font-sans: 'BIZ UDPGothic', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
+}
+
+html {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+}

@@ -1,0 +1,13 @@
+# 島のシーンの幾何ルール。フィールドは docs/03-database.md islandScenes.features を参照。
+# 座標は相対座標（0〜1）で、画面中心は (0.5, 0.5)。数値はすべて専門家レビュー待ちの未定値（根拠は docs/01-prd.md モジュール1の D 領域のルール）。
+# これらのルールが出力する D-ISLNEAR-001、D-ISLCTR-001、D-ENCL-001、D-ISO-001 はすべて scoring: observe。通常どおり計算して保存するが、リスクエンジンは読まない。
+# 「キャラクター」として数えるアイテムのカテゴリ（games/island_items.yaml の category に対応）
+figure_categories: [animal]
+# 孤立：自分以外のキャラクターが isolated_min_other_figures 個以上置かれていて、
+# かつ自分とほかのすべてのキャラクターとの距離が isolated_min_dist 以上のときだけ孤立とする。
+# 自分だけ、またはほかのキャラクターが1個だけのときは孤立と判定しない（情報不足のため 0）。signal-worker の実装はまだこの定義に追いついていない。signals/README.md を参照。
+isolated_min_dist: 0.3
+isolated_min_other_figures: 2
+# 囲まれている：この半径内にアイテムが enclosed_min_neighbors 個以上（カテゴリは問わない）あり、それらが自分を取り囲んでいる（隣り合う方向の最大の角度が 180 度未満）
+neighbor_radius: 0.25
+enclosed_min_neighbors: 3

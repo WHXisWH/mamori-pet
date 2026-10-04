@@ -1,0 +1,11 @@
+# 専門家署名ファイルの記入例。status: DRAFT のファイルは署名として数えない。
+# 実際に署名する時は status を外し（または signed にし）、manifest_hash に
+# `kb-manifest` が出力する manifest.files（review/ を除く）のハッシュを書く。
+status: DRAFT
+reviewer: 記入例（氏名）
+qualification: 記入例（公認心理師 / スクールカウンセラー など）
+scope:
+  - '**'
+reviewed_at: '2026-01-01'
+manifest_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+signature_note: 記入例。レビュー範囲、確認した観点、保留事項をここに書く。

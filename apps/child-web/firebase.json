@@ -1,0 +1,51 @@
+{
+  "hosting": {
+    "site": "mamori-child",
+    "public": "public",
+    "ignore": ["**/.*"],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "no-referrer" },
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(), geolocation=(self), microphone=(self)"
+          }
+        ]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+          { "key": "Service-Worker-Allowed", "value": "/" }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": { "serviceId": "child-web", "region": "asia-northeast1" }
+      }
+    ]
+  },
+  "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8095
+    },
+    "hub": {
+      "host": "127.0.0.1",
+      "port": 4405
+    },
+    "logging": {
+      "host": "127.0.0.1",
+      "port": 4505
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}
