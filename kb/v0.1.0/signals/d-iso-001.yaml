@@ -10,6 +10,6 @@ method: rule
 scoring: observe
 metric: d_isolated
 evidence:
-  sources: [doc_backend_workers, paper_sketching_silence, paper_projective_review]
+  sources: [doc_backend_workers, mongillo_sketching_silence_2026, koli_trauma_screening_synthetic_preprint_2026, la_grutta_drawn_stories_2023, lilienfeld_projective_techniques_2000, cox_catte_disturbed_children_drawings_2000, jankelowitz_sand_therapy_review_2026]
   strength: low
 reviewed_by: 未定

@@ -30,7 +30,7 @@ daily:
     school_event: { a: 0.5, m: 0.5, i: 0.5 }
     sick: { a: 0.5, v: 0.5, m: 0.5, i: 0.5 }
     travel: { i: 0.5 }
-    class_change: { a: 0.5, m: 0.5 }
+    # クラス替え・新学期は見守りを厚くする時期なので、逸脱を割り引かない（1日として数える）
   # これらのコンテキスト情報の期間内の日は、休みの日としてベースラインを取る
   rest_day_contexts: [long_vacation]
   # L2：直近 window_days 日のうち、この特徴が 0 より大きい日が min_days 日以上

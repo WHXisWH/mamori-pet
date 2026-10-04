@@ -8,6 +8,6 @@ explicit: false
 method: rule
 metric: v_pitch_mean_hz
 evidence:
-  sources: [doc_agent_architecture]
+  sources: [doc_agent_architecture, low_speech_psychiatric_review_2020, sellier_silva_speech_youth_review_2025, mcginnis_speech_young_children_2019]
   strength: low
 reviewed_by: 未定

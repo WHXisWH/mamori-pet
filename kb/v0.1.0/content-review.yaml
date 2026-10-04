@@ -1,4 +1,7 @@
-review_status: draft_pending_expert_review
+# review_status: literature_reviewed は、出典登録簿の文献に照らして AI が内容を確認した段階。専門家の署名ではない。
+# evidence_registry の sections は sources/registry.yaml の id。各ファイルの「出典」の節に書いた id と一致させる。
+# 確認の内容と限界は sources/evidence-review.md を参照。
+review_status: literature_reviewed
 scope: everyday_conversation_not_clinical_guidance
 sources:
   prd:
@@ -13,58 +16,106 @@ sources:
     path: prompts/charter.md
     sections: ['いつも守ること', 'ツールの使い方']
     kind: product_requirement
+  evidence_companion:
+    path: sources/registry.yaml
+    sections: [unicef_guidance_ai_children_v3_2025, ico_childrens_code_standards_2020, ico_childrens_code_parental_controls_2020, apa_advisory_genai_chatbots_2025, mext_genai_guideline_v2_2024]
+    kind: evidence_registry
+  evidence_bedtime:
+    path: sources/registry.yaml
+    sections: [mhlw_suimin_guide_2023, carter_screen_sleep_meta_2016, bartel_adolescent_sleep_meta_2015, van_dolen_online_child_helpline_2019, tochigi_2012_bedtime_phone_japan, apa_advisory_genai_chatbots_2025]
+    kind: evidence_registry
+  evidence_daily_listening:
+    path: sources/registry.yaml
+    sections: [who_pfa_field_guide_ja_2011, van_dolen_online_child_helpline_2019, nier_leaf20_anketo_kyouiku_soudan, apa_advisory_genai_chatbots_2025, unicef_guidance_ai_children_v3_2025]
+    kind: evidence_registry
+  evidence_exclusion:
+    path: sources/registry.yaml
+    sections: [ijime_boushi_taisaku_suishin_hou, nier_ijime_tsuiseki_2013_2015, casper_card_2017_overt_relational_meta, who_pfa_field_guide_ja_2011, andrews_lamb_repeated_questions_2014, mext_ijime_sign_hakken_sheet_2014, blomqvist_2020_telling_adults]
+    kind: evidence_registry
+  evidence_online_distance:
+    path: sources/registry.yaml
+    sections: [li_2024_tb_cb_mental_health_meta, modecki_2014_prevalence_meta, gini_2018_cyber_traditional_meta, olweus_limber_2018_cyber_problems, ijime_boushi_taisaku_suishin_hou, who_media_suicide_2023_ja, mext_genai_guideline_v2_2024]
+    kind: evidence_registry
+  evidence_play_expression:
+    path: sources/registry.yaml
+    sections: [lilienfeld_projective_techniques_2000, cox_catte_disturbed_children_drawings_2000, jankelowitz_sand_therapy_review_2026, bratton_play_therapy_meta_2005, travagin_expressive_writing_meta_2015, kurian_empathy_gap_2024]
+    kind: evidence_registry
+  evidence_privacy_memory:
+    path: sources/registry.yaml
+    sections: [ico_childrens_code_parental_controls_2020, ico_childrens_code_standards_2020, chi_core_quality_standards, samhsa_trauma_informed_2014, mext_kyoushi_jisatsu_yobou_2009, ford_confidentiality_rct_1997, ppc_kojin_jouhou_kaisei_r8, unicef_guidance_ai_children_v3_2025]
+    kind: evidence_registry
+  evidence_quiet_choice:
+    path: sources/registry.yaml
+    sections: [who_pfa_field_guide_ja_2011, samhsa_trauma_informed_2014, kodomo_kihon_hou_2022, gulliver_help_seeking_2010, nier_leaf20_anketo_kyouiku_soudan, braund_keystroke_adolescents_2023, unicef_guidance_ai_children_v3_2025]
+    kind: evidence_registry
+  evidence_school_morning:
+    path: sources/registry.yaml
+    sections: [mext_futoukou_tsuuchi_2019, mext_seitoshidou_teiyou_2022, mext_futoukou_youin_2024, mhlw_suimin_guide_2023, moore_2017_consequences_meta, maynard_school_refusal_2018, mext_ijime_sign_hakken_sheet_2014]
+    kind: evidence_registry
+  evidence_self_blame:
+    path: sources/registry.yaml
+    sections: [schacter_2015_why_me, graham_juvonen_1998_self_blame, perren_2013_attributions, yun_juvonen_2020_healthy_context_paradox, who_pfa_field_guide_ja_2011, mext_ijime_sign_hakken_sheet_2014, kitagawa_2014_help_seeking_japan]
+    kind: evidence_registry
+  evidence_teasing:
+    path: sources/registry.yaml
+    sections: [mext_mondai_chousa_r6, nier_leaf07_ijime_no_rikai, keltner_2001_just_teasing, kochenderfer_ladd_responses_1997, kochenderfer_ladd_skinner_coping_2002, mext_ijime_sign_hakken_sheet_2014, gaffney_2021_antibullying_programs_meta]
+    kind: evidence_registry
+  evidence_tell_adult:
+    path: sources/registry.yaml
+    sections: [blomqvist_2020_telling_adults, boulton_2017_barriers_teachers, xu_help_seeking_interventions_2018, gaffney_2021_antibullying_programs_meta, mhlw_gatekeeper_text_2024, mext_kyoushi_jisatsu_yobou_2009, ico_childrens_code_parental_controls_2020, cfa_jidou_soudanjo_189]
+    kind: evidence_registry
 documents:
   - path: prompts/persona/moko.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/persona/pokke.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/persona/togemaru.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/persona/nami.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/persona/hoshi.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/persona/hidden.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/grade/low.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/grade/high.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: prompts/grade/jhs.md
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_companion]
   - path: skills/daily-listening.md
     topics: ['好きな遊び', '趣味', '今日の発見']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_daily_listening]
   - path: skills/exclusion.md
     topics: ['無視', '仲間外れ', 'ハブられた', 'なかまに いれてくれない']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_exclusion]
   - path: skills/teasing.md
     topics: ['からかい', 'あだ名', 'わらわれた']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_teasing]
   - path: skills/online-distance.md
     topics: ['既読', 'グループチャット', 'オンライン']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_online_distance]
   - path: skills/self-blame.md
     topics: ['自分のせい', '自責', 'ぼくが悪い']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_self_blame]
   - path: skills/school-morning.md
     topics: ['登校', '朝の支度', 'がっこうに いきたくない', 'おなかがいたい']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_school_morning]
   - path: skills/quiet-choice.md
     topics: ['話したくない', '沈黙', 'なんでもない']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_quiet_choice]
   - path: skills/tell-adult.md
     topics: ['大人に伝える', '言い出し方', 'おとなに はなしたい']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_tell_adult]
   - path: skills/privacy-memory.md
     topics: ['秘密', '記憶の削除', 'わすれて']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_privacy_memory]
   - path: skills/play-expression.md
     topics: ['絵', '島', '物語']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_play_expression]
   - path: skills/bedtime.md
     topics: ['寝る前', '夜更かし', 'おやすみ']
-    sources: [prd, architecture, charter]
+    sources: [prd, architecture, charter, evidence_bedtime]
 game_content:
   - path: games/drawing_requests.yaml
     sources: [prd]

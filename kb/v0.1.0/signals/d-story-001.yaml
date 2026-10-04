@@ -7,7 +7,9 @@ grade_bands: [low, high, jhs]
 explicit: false
 method: rule
 metric: d_story_negative
+# 物語の結末から不調を読み取る方法は妥当性が検証されていないため、記録するだけでスコアには使わない
+scoring: observe
 evidence:
-  sources: [doc_backend_workers]
+  sources: [doc_backend_workers, la_grutta_drawn_stories_2023, lilienfeld_projective_techniques_2000, cox_catte_disturbed_children_drawings_2000, mongillo_sketching_silence_2026]
   strength: low
 reviewed_by: 未定

@@ -8,6 +8,6 @@ grade_bands: [low, high, jhs]
 explicit: true
 method: rule
 evidence:
-  sources: [doc_backend_workers, doc_agent_architecture]
+  sources: [doc_backend_workers, doc_agent_architecture, la_grutta_drawn_stories_2023, lilienfeld_projective_techniques_2000, cox_catte_disturbed_children_drawings_2000, mongillo_sketching_silence_2026]
   strength: medium
 reviewed_by: 未定

@@ -8,6 +8,6 @@ explicit: false
 method: rule
 metric: a_school_avoid
 evidence:
-  sources: [doc_agent_architecture]
+  sources: [doc_agent_architecture, mext_futoukou_tsuuchi_2019, mext_mondai_chousa_r6, mext_cocolo_plan_2023]
   strength: low
 reviewed_by: 未定

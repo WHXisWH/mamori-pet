@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runManifestCli } from '../src/cli.js';
-import { DRAFT_MARKER, isConversationContent } from '../src/content.js';
+import { DRAFT_MARKER, isConversationContent, LITERATURE_MARKER } from '../src/content.js';
 import { buildManifest } from '../src/kb.js';
 import { manifestHash } from '../src/review.js';
 import { FsKbSource } from '../src/source.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = new FsKbSource(resolve(here, '../../../kb/v0.1.0'));
+const REVIEW_STATUS_LINE = /^review_status: .+$/m;
 
 describe('supported manifest CLI content checks', () => {
   let temp: string;
@@ -32,7 +33,68 @@ describe('supported manifest CLI content checks', () => {
     await rm(temp, { recursive: true, force: true });
   });
 
+  async function setReviewStatus(status: string) {
+    const review = join(dir, 'content-review.yaml');
+    await writeFile(
+      review,
+      (await readFile(review, 'utf8')).replace(REVIEW_STATUS_LINE, `review_status: ${status}`),
+    );
+  }
+
+  async function relabelContent(marker: string) {
+    const copy = new FsKbSource(dir);
+    for (const path of (await copy.list()).filter(isConversationContent)) {
+      const text = (await copy.read(path)).toString('utf8');
+      await writeFile(join(dir, path), text.replaceAll(LITERATURE_MARKER, marker));
+    }
+  }
+
+  // The real KB is past the draft stage, so the draft case is rebuilt inside the copy.
+  async function draftFixture() {
+    await relabelContent(DRAFT_MARKER);
+    await setReviewStatus('draft_pending_expert_review');
+    const file = join(dir, 'manifest.json');
+    const manifest = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    await writeFile(
+      file,
+      JSON.stringify({ ...manifest, reviewStatus: 'draft_pending_expert_review' }),
+    );
+  }
+
   it('preserves the explicit draft status and empty approval when regenerating hashes', async () => {
+    // Arrange
+    await draftFixture();
+
+    // Act
+    const written = await runManifestCli([dir]);
+
+    // Assert
+    expect(written).toBe(0);
+    const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as {
+      reviewStatus: string;
+      approvedBy: string[];
+    };
+    expect(manifest.reviewStatus).toBe('draft_pending_expert_review');
+    expect(manifest.approvedBy).toEqual([]);
+    expect(await runManifestCli([dir, '--check'])).toBe(0);
+    expect(process.stderr.write).not.toHaveBeenCalled();
+  });
+
+  it('rejects a draft release without writing or inventing expert approval', async () => {
+    // Arrange
+    await draftFixture();
+    expect(await runManifestCli([dir])).toBe(0);
+    const manifest = await readFile(join(dir, 'manifest.json'), 'utf8');
+
+    // Act
+    const released = runManifestCli([dir, '--check', '--release']);
+
+    // Assert
+    await expect(released).rejects.toThrow('not releasable');
+    expect(await readFile(join(dir, 'manifest.json'), 'utf8')).toBe(manifest);
+  });
+
+  it('preserves the literature-reviewed status and empty approval when regenerating hashes', async () => {
     const path = join(dir, 'skills/daily-listening.md');
     await writeFile(path, `${await readFile(path, 'utf8')}\n`);
     expect(await runManifestCli([dir])).toBe(0);
@@ -40,7 +102,7 @@ describe('supported manifest CLI content checks', () => {
       reviewStatus: string;
       approvedBy: string[];
     };
-    expect(manifest.reviewStatus).toBe('draft_pending_expert_review');
+    expect(manifest.reviewStatus).toBe('literature_reviewed');
     expect(manifest.approvedBy).toEqual([]);
     expect(await runManifestCli([dir, '--check'])).toBe(0);
     expect(process.stderr.write).not.toHaveBeenCalled();
@@ -63,26 +125,34 @@ describe('supported manifest CLI content checks', () => {
     expect(await readFile(join(dir, 'manifest.json'), 'utf8')).toBe(manifest);
   });
 
-  it('rejects an unapproved release without writing or inventing expert approval', async () => {
+  it('rejects a literature-reviewed release without writing or inventing expert approval', async () => {
     const manifest = await readFile(join(dir, 'manifest.json'), 'utf8');
+    expect((JSON.parse(manifest) as { reviewStatus: string }).reviewStatus).toBe(
+      'literature_reviewed',
+    );
     await expect(runManifestCli([dir, '--check', '--release'])).rejects.toThrow('not releasable');
+    await expect(runManifestCli([dir, '--release'])).rejects.toThrow('no signed expert review');
+    expect(await readFile(join(dir, 'manifest.json'), 'utf8')).toBe(manifest);
+  });
+
+  it('does not refresh checksums for literature-reviewed content relabelled as a draft body', async () => {
+    // Arrange
+    const manifest = await readFile(join(dir, 'manifest.json'), 'utf8');
+    const path = join(dir, 'skills/bedtime.md');
+    await writeFile(path, `${await readFile(path, 'utf8')}\n${DRAFT_MARKER}\n`);
+
+    // Act
+    const written = runManifestCli([dir]);
+
+    // Assert
+    await expect(written).rejects.toThrow('draft body cannot be marked literature reviewed');
     expect(await readFile(join(dir, 'manifest.json'), 'utf8')).toBe(manifest);
   });
 
   async function approvedFixture(reviewer = 'synthetic-reviewer') {
     const copy = new FsKbSource(dir);
-    for (const path of (await copy.list()).filter(isConversationContent)) {
-      const text = (await copy.read(path)).toString('utf8');
-      await writeFile(join(dir, path), text.replaceAll(DRAFT_MARKER, '専門家レビュー済み'));
-    }
-    const review = join(dir, 'content-review.yaml');
-    await writeFile(
-      review,
-      (await readFile(review, 'utf8')).replace(
-        'review_status: draft_pending_expert_review',
-        'review_status: expert_approved',
-      ),
-    );
+    await relabelContent('専門家レビュー済み');
+    await setReviewStatus('expert_approved');
     const { files } = await buildManifest(copy, {
       version: '0.1.0',
       releasedAt: '2026-10-03T00:00:00.000Z',

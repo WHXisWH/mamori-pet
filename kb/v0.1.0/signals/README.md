@@ -1,6 +1,15 @@
 # シグナル定義
 
-DRAFT / 専門家未レビュー。シグナル1つにつき YAML ファイルを1つ置きます。フィールドは docs/01-prd.md モジュール1のシグナル項目の定義に合わせています。構造は `@ijime/kb-loader` の `signalDefinitionSchema` が、内容は `validateKnowledgeBase` が検証します（`pnpm kb:check` と `pnpm kb:manifest` のどちらでも実行されます）。`reviewed_by` はすべて未定で、正式に承認されたものとは見なせません。
+状態: DRAFT / 専門家未レビュー。シグナル定義は専門家の確認待ちで、`reviewed_by` はすべて未定です。
+
+ナレッジベースの状態は 3 段階あります（DRAFT / 専門家未レビュー、文献確認済み / 専門家未署名、専門家承認済み）。会話ガイドは「文献確認済み / 専門家未署名」に進みましたが、シグナル定義は DRAFT のままです。出典は `sources/registry.yaml` に登録して文献を確認しましたが、その結果に合わせた定義の見直し（`scoring` の変更など）はまだ行っていません。領域ごとの根拠、スコアに使ってよいか観察にとどめるか、見直しの提言は `sources/evidence-review.md` の「シグナル領域ごとの結論」にまとめています。主な点は次のとおりです。
+
+- どの領域も、単独では判定に使えません。サインの感度・特異度を検証した研究は見つかっていません。
+- K（入力）・V（声）・I（時刻）領域は、文献上は観察にとどめるのが妥当です。現在は `scoring` の指定がなく、既定の `score` になっています。
+- 深夜の利用時刻は、いじめ被害のサインになりません。帰宅の時刻は根拠が見つからず、収集の必要性を再検討する対象です。
+- 気分の自己報告（M）は本人の申告として使えますが、単独では判定しません。未回答を不調とも元気とも解釈しません。
+
+シグナル1つにつき YAML ファイルを1つ置きます。フィールドは docs/01-prd.md モジュール1のシグナル項目の定義に合わせています。構造は `@ijime/kb-loader` の `signalDefinitionSchema` が、内容は `validateKnowledgeBase` が検証します（`pnpm kb:check` と `pnpm kb:manifest` のどちらでも実行されます）。正式に承認されたものとは見なせません。
 
 ## フィールドの決まり
 
@@ -21,7 +30,7 @@ DRAFT / 専門家未レビュー。シグナル1つにつき YAML ファイル�
 
 ## observe と score（D 領域の形式的な特徴）
 
-お絵かきと島の形式的な特徴（D-SELF-001、D-NEAR-001、D-ISO-001、D-ENCL-001、D-ISLNEAR-001、D-ISLCTR-001）は `scoring: observe` です。これらは相談室でセラピストが過程と合わせて解釈するもので、プログラムだけで点数化する確かな根拠がありません（registry：paper_projective_review、paper_sandplay_review）。D-STORY-001（物語の結末。registry：paper_drawn_stories）と D-HARM-001（語りの中の明確な危害）は `score` のままです。
+お絵かきと島の形式的な特徴（D-SELF-001、D-NEAR-001、D-ISO-001、D-ENCL-001、D-ISLNEAR-001、D-ISLCTR-001）は `scoring: observe` です。これらは相談室でセラピストが過程と合わせて解釈するもので、プログラムだけで点数化する確かな根拠がありません（registry：lilienfeld_projective_techniques_2000、cox_catte_disturbed_children_drawings_2000、jankelowitz_sand_therapy_review_2026）。koli_trauma_screening_synthetic_preprint_2026 は合成データだけで評価した査読前の論文で、判定できることの根拠にはなりません。D-STORY-001（物語の結末。registry：la_grutta_drawn_stories_2023）と D-HARM-001（語りの中の明確な危害）は `score` のままです。ただし la_grutta_drawn_stories_2023 はいじめの検出を目的とした研究ではなく、判定の精度を示していません。D-STORY-001 を観察に変えるかどうかは専門家の確認待ちです。
 
 ある `observe` を `score` に変える条件は次のとおりです。パイロットで同じ子どもの作品が複数たまり、その特徴と気分・会話のシグナルとの対応が確かめられていること。公認心理師が `reviewed_by` に署名していること。これは設定の変更であり、コードは変更しません。
 

@@ -8,6 +8,6 @@ explicit: false
 method: rule
 metric: i_message_hour
 evidence:
-  sources: [doc_agent_architecture]
+  sources: [doc_agent_architecture, tochigi_2012_bedtime_phone_japan, van_geel_2016_sleep_meta, levkova_bullying_sleep_meta_2026, mhlw_suimin_guide_2023]
   strength: low
 reviewed_by: 未定

@@ -96,9 +96,11 @@ locals {
       CHILD_WEB_ORIGIN = var.child_web_origin
       VOICE_MODEL_MODE = "vertex"
     }
-    pet-agent = {
-      PET_MODEL_MODE = "vertex"
-    }
+    # dev だけ、文献確認済み（専門家の署名なし）のナレッジベースを検索に使える。prod は専門家の署名が必須。
+    pet-agent = merge(
+      { PET_MODEL_MODE = "vertex" },
+      var.environment == "dev" ? { KB_UNSIGNED_SEARCH = "literature_reviewed" } : {},
+    )
     signal-worker = {}
     risk-engine = {
       NOTIFIER_URL     = local.service_urls["notifier"]

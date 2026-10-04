@@ -516,8 +516,19 @@ BigQuery が受け取るのは非識別化した数値の特徴量だけで、�
 | templates/notifications/\*.ja.md | 保護者向け通知のテンプレート | 通知文の作成 Agent |
 | games/story\_prompts.yaml、games/island\_items.yaml | お話の書き出し、箱庭アイテムのカタログとそのカテゴリ | フロントエンド、シグナルサービス |
 | manifest.json | バージョン番号、承認者、各ファイルのチェックサム、公開時刻 | すべてのサービスが起動時に検証する |
+| sources/registry.yaml、sources/evidence-review.md | 出典の登録簿（原文で確認できたかどうかを出典ごとに記録）と、根拠の確認記録 | kb-loader の検証。シグナルと会話ガイドは登録済みの出典だけを引用できる |
 
 ベクトル検索の対象になるのは skills/\*.md だけです（ルートコレクション kbChunks：kbVersion、skillId、chunkIndex、text、embedding、approved。バージョン単位でまるごと入れ替える）。ルールファイルはリスクエンジンが直接読み込み、検索を経由しません。これにより、計算結果を毎回再現できます。kbChunks は `scripts/kb-publish.mjs` で公開します。まず kb:check と `review/*.yaml` の専門家の承認署名を確認します（署名が全ファイルを対象とし、manifest_hash が一致している必要があります。そうでない場合は、本番以外の環境に限り `--allow-draft` を付けて approved=false で書き込めます）。次に skills をチャンクに分割し、Vertex AI（東京）の text-embedding でベクトルを生成して kbChunks に書き込みます（新しいバージョンを書き込んでから古いバージョンを削除します）。最後にバージョンのディレクトリ全体を {project}-kb/{version}/ にアップロードします。
+
+ナレッジベースの確認状態は3段階です。manifest.json の reviewStatus と content-review.yaml の review_status に同じ値を書き、各ファイルの冒頭の状態表示と一致していることを kb-loader が検証します。
+
+| 状態 | 意味 | ペット Agent の検索（search\_skill） |
+| --- | --- | --- |
+| draft\_pending\_expert\_review | 下書き。出典は未確認 | 本番環境では使わない |
+| literature\_reviewed | 出典を原文で確認し、会話ガイドごとに根拠の文献を対応づけた状態。専門家の署名はない（approvedBy は空） | dev 環境に限り、環境変数 KB\_UNSIGNED\_SEARCH=literature\_reviewed を設定したときだけ使う。prod では使わない |
+| expert\_approved | 公認心理師などの専門家が確認し、review/\*.yaml に署名した状態 | 使う |
+
+文献の確認は専門家の承認の代わりにはなりません。prod への公開（`--release`）には expert\_approved が必要です。
 
 シグナル定義の例：
 

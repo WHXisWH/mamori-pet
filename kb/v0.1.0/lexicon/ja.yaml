@@ -1,5 +1,5 @@
 # DRAFT / 専門家未レビュー
-# 日本語表現の語彙表。出典：docs/01-prd.md モジュール1の日本語表現の語彙表（P0 の6分類）。出典の登録は sources/registry.yaml（mext_problem_behavior_survey、doc_prd）を参照。
+# 日本語表現の語彙表。出典：docs/01-prd.md モジュール1の日本語表現の語彙表（P0 の6分類）。出典の登録は sources/registry.yaml（mext_mondai_chousa_r6、doc_prd）を参照。
 # 日本の子どものサンプルではまだ検証していない。パイロットのデータと専門家のラベル付けで調整する必要がある。表現はすべて開発用に創作したもので、子どもの実際の記録ではない。
 # フィールド：explicit は、その分類の表現が「子どもが被害の経験を明確に話す」（PRD L3）に当たるかどうか。grade_bands は出現を想定する学年帯。
 # id が crisis の分類だけが packages/crisis-detector のキーワード層に入る。一致したらすべて危機として扱うため、crisis には誤検知しにくい完全な表現だけを置く

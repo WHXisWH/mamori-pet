@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { buildPetInstruction, defaultPetName } from '@ijime/agent-core';
 import { CHARACTER_IDS, GRADE_BANDS } from '@ijime/api-types';
 import { agent } from '@ijime/config';
-import { FsKbSource, Kb } from '@ijime/kb-loader';
+import { DRAFT_MARKER, FsKbSource, Kb, LITERATURE_MARKER } from '@ijime/kb-loader';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   chunkSkill,
   createSkillSearch,
   FakeEmbedder,
+  UNSIGNED_SEARCH_ENV,
   type KbChunkHit,
   type KbChunkStore,
   type SkillChunk,
@@ -36,7 +37,7 @@ const cosineDistance = (a: number[], b: number[]) =>
   1 - a.reduce((sum, value, i) => sum + value * b[i]!, 0);
 
 class MemoryChunkStore implements KbChunkStore {
-  readonly nearestCalls: { kbVersion: string; limit: number }[] = [];
+  readonly nearestCalls: { kbVersion: string; limit: number; approved?: boolean }[] = [];
   private readonly rows: { kbVersion: string; chunk: SkillChunk; vector: number[] }[] = [];
 
   async add(kbVersion: string, chunks: SkillChunk[]) {
@@ -47,8 +48,12 @@ class MemoryChunkStore implements KbChunkStore {
     chunks.forEach((chunk, i) => this.rows.push({ kbVersion, chunk, vector: vectors[i]! }));
   }
 
-  async nearest(input: { kbVersion: string; vector: number[]; limit: number }) {
-    this.nearestCalls.push({ kbVersion: input.kbVersion, limit: input.limit });
+  async nearest(input: { kbVersion: string; vector: number[]; limit: number; approved?: boolean }) {
+    this.nearestCalls.push({
+      kbVersion: input.kbVersion,
+      limit: input.limit,
+      ...(input.approved === undefined ? {} : { approved: input.approved }),
+    });
     return this.rows
       .filter((row) => row.kbVersion === input.kbVersion)
       .map((row) => ({
@@ -62,7 +67,7 @@ class MemoryChunkStore implements KbChunkStore {
   }
 }
 
-describe('real draft conversation content (not model or clinical evaluation)', () => {
+describe('real literature-reviewed conversation content (not model or clinical evaluation)', () => {
   let kb: Kb;
   const skillPaths = () =>
     kb.paths('skills/').filter((path) => path.endsWith('.md') && !path.endsWith('/README.md'));
@@ -91,7 +96,8 @@ describe('real draft conversation content (not model or clinical evaluation)', (
       memories: [],
     });
     expect(instruction).not.toMatch(/プレースホルダー|専門家の補足待ち|\bTODO\b|\bTBD\b/);
-    expect(instruction).toContain('DRAFT / 専門家未レビュー');
+    expect(instruction).toContain(LITERATURE_MARKER);
+    expect(instruction).not.toContain(DRAFT_MARKER);
     const charter = await kb.text('prompts/charter.md');
     expect(
       instruction.startsWith(
@@ -106,32 +112,36 @@ describe('real draft conversation content (not model or clinical evaluation)', (
     expect(instruction.endsWith(voiceRules)).toBe(input.voice);
   });
 
-  it.each(cases)('retrieves an applicable verified draft for %s', async (query, name) => {
-    const embed = vi.spyOn(fake, 'embed');
-    const search = await createSkillSearch(kb, { NODE_ENV: 'test' }, { embedder: fake });
-    const passages = (await search(query)).map(
-      (item) =>
-        JSON.parse(item) as {
-          path: string;
-          text: string;
-          kind: string;
-          kbVersion: string;
-        },
-    );
-    expect(passages.map((passage) => passage.path)).toContain(`skills/${name}.md`);
-    expect(passages[0]?.path).toBe(`skills/${name}.md`);
-    expect(passages.length).toBeLessThanOrEqual(agent.searchSkillMaxPassages);
-    for (const passage of passages) {
-      expect(passage.kind).toBe('reference');
-      expect(passage.kbVersion).toBe(kb.version);
-      expect(passage.text).toBe(await kb.text(passage.path));
-      expect(passage.text).toContain('DRAFT / 専門家未レビュー');
-    }
-    expect(embed).not.toHaveBeenCalled();
-    embed.mockRestore();
-  });
+  it.each(cases)(
+    'retrieves an applicable, honestly labelled reference for %s',
+    async (query, name) => {
+      const embed = vi.spyOn(fake, 'embed');
+      const search = await createSkillSearch(kb, { NODE_ENV: 'test' }, { embedder: fake });
+      const passages = (await search(query)).map(
+        (item) =>
+          JSON.parse(item) as {
+            path: string;
+            text: string;
+            kind: string;
+            kbVersion: string;
+          },
+      );
+      expect(passages.map((passage) => passage.path)).toContain(`skills/${name}.md`);
+      expect(passages[0]?.path).toBe(`skills/${name}.md`);
+      expect(passages.length).toBeLessThanOrEqual(agent.searchSkillMaxPassages);
+      for (const passage of passages) {
+        expect(passage.kind).toBe('reference');
+        expect(passage.kbVersion).toBe(kb.version);
+        expect(passage.text).toBe(await kb.text(passage.path));
+        expect(passage.text).toContain(LITERATURE_MARKER);
+        expect(passage.text).not.toContain(DRAFT_MARKER);
+      }
+      expect(embed).not.toHaveBeenCalled();
+      embed.mockRestore();
+    },
+  );
 
-  it('does not expose draft skills in production or query the chunk store', async () => {
+  it('does not expose unsigned skills in production or query the chunk store without the opt-in', async () => {
     const store = new MemoryChunkStore();
     for (const path of skillPaths())
       await store.add(kb.version, chunkSkill(path, await kb.text(path)));
@@ -143,6 +153,39 @@ describe('real draft conversation content (not model or clinical evaluation)', (
     expect(kb.manifest.approvedBy).toEqual([]);
     for (const [query] of cases) expect(await search(query)).toEqual([]);
     expect(store.nearestCalls).toEqual([]);
+  });
+
+  it('serves the literature-reviewed KB in production only from unsigned chunks when opted in', async () => {
+    // Arrange
+    const store = new MemoryChunkStore();
+    for (const path of skillPaths())
+      await store.add(kb.version, chunkSkill(path, await kb.text(path)));
+    const search = await createSkillSearch(
+      kb,
+      {
+        NODE_ENV: 'production',
+        GCP_PROJECT_ID: 'demo-ijime',
+        [UNSIGNED_SEARCH_ENV]: 'literature_reviewed',
+      },
+      { chunks: store, embedder: fake },
+    );
+
+    // Act
+    const results = await Promise.all(cases.map(([query]) => search(query)));
+
+    // Assert
+    expect(kb.manifest.reviewStatus).toBe('literature_reviewed');
+    expect(kb.manifest.approvedBy).toEqual([]);
+    for (const passages of results) {
+      expect(passages.length).toBeGreaterThan(0);
+      for (const passage of passages) {
+        const { path, text } = JSON.parse(passage) as { path: string; text: string };
+        expect(text).toBe(await kb.text(path));
+        expect(text).toContain(LITERATURE_MARKER);
+      }
+    }
+    expect(store.nearestCalls).toHaveLength(cases.length);
+    for (const call of store.nearestCalls) expect(call.approved).toBe(false);
   });
 
   it('returns no content for an unrelated identifier', async () => {

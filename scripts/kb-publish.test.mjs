@@ -69,13 +69,16 @@ async function approve(dir) {
   const source = new kbLoader.FsKbSource(dir);
   for (const path of (await source.list()).filter(kbLoader.isConversationContent)) {
     const text = (await source.read(path)).toString('utf8');
-    await writeFile(join(dir, path), text.replaceAll(kbLoader.DRAFT_MARKER, '専門家レビュー済み'));
+    await writeFile(
+      join(dir, path),
+      text.replaceAll(kbLoader.LITERATURE_MARKER, '専門家レビュー済み'),
+    );
   }
   const review = join(dir, 'content-review.yaml');
   await writeFile(
     review,
     (await readFile(review, 'utf8')).replace(
-      'review_status: draft_pending_expert_review',
+      /^review_status: .+$/m,
       'review_status: expert_approved',
     ),
   );
@@ -177,7 +180,22 @@ test('approval requires verified signatures that cover every manifest approver',
   });
 });
 
-test('the bundled draft KB is refused without --allow-draft and nothing is written', async () => {
+test('a literature-reviewed manifest is never published as approved', async () => {
+  const literature = { manifest: { approvedBy: [], reviewStatus: 'literature_reviewed' } };
+  const ok = async () => ({ reviewers: ['a'] });
+  await assert.rejects(decideApproval(literature, ok, { environment: 'dev' }), {
+    message: 'kb_unapproved',
+  });
+  await assert.rejects(decideApproval(literature, ok, { environment: 'prod' }), {
+    message: 'kb_unapproved',
+  });
+  assert.deepEqual(await decideApproval(literature, ok, { environment: 'dev', allowDraft: true }), {
+    approved: false,
+    reviewers: [],
+  });
+});
+
+test('the bundled unsigned KB is refused without --allow-draft and nothing is written', async () => {
   const db = fakeFirestore(['old']);
   const { log } = quiet();
   await assert.rejects(

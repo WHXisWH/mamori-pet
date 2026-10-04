@@ -9,6 +9,6 @@ method: rule
 scoring: observe
 metric: d_nearest_dist
 evidence:
-  sources: [doc_backend_workers]
+  sources: [doc_backend_workers, la_grutta_drawn_stories_2023, lilienfeld_projective_techniques_2000, cox_catte_disturbed_children_drawings_2000, mongillo_sketching_silence_2026]
   strength: low
 reviewed_by: 未定

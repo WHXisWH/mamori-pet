@@ -8,6 +8,6 @@ explicit: false
 method: rule
 metric: m_mood_score
 evidence:
-  sources: [doc_backend_workers]
+  sources: [doc_backend_workers, drexl_youth_ema_missing_data_meta_2025, mulligan_my_feelings_form_2023, wen_youth_ema_compliance_meta_2017]
   strength: low
 reviewed_by: 未定

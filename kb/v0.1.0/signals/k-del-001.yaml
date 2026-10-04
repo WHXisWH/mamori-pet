@@ -8,6 +8,6 @@ explicit: false
 method: rule
 metric: k_delete_ratio
 evidence:
-  sources: [doc_agent_architecture]
+  sources: [doc_agent_architecture, braund_keystroke_adolescents_2023, alfalahi_keystroke_meta_2022]
   strength: low
 reviewed_by: 未定

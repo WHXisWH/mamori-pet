@@ -195,7 +195,27 @@ export type KbChunkHit = {
 };
 
 export interface KbChunkStore {
-  nearest(input: { kbVersion: string; vector: number[]; limit: number }): Promise<KbChunkHit[]>;
+  // approved を省略すると専門家が署名したチャンクだけを返す。false は未署名のチャンクを明示的に求める場合。
+  nearest(input: {
+    kbVersion: string;
+    vector: number[];
+    limit: number;
+    approved?: boolean;
+  }): Promise<KbChunkHit[]>;
+}
+
+// 専門家の署名がないナレッジベースを検索に使えるのは、文献確認済みで、かつ環境がそれを明示的に許可したときだけ。
+export const UNSIGNED_SEARCH_ENV = 'KB_UNSIGNED_SEARCH';
+export function skillSearchAccess(
+  env: NodeJS.ProcessEnv,
+  manifest: { approvedBy: string[]; reviewStatus?: string | undefined },
+): 'signed' | 'unsigned' | 'closed' {
+  if (manifest.approvedBy.length > 0) return 'signed';
+  if (env['NODE_ENV'] !== 'production') return 'signed';
+  return manifest.reviewStatus === 'literature_reviewed' &&
+    env[UNSIGNED_SEARCH_ENV] === 'literature_reviewed'
+    ? 'unsigned'
+    : 'closed';
 }
 
 export class VectorSearchUnsupportedError extends Error {
@@ -217,12 +237,12 @@ const UNSUPPORTED_CODES = new Set([3, 9, 12]);
 export class FirestoreKbChunkStore implements KbChunkStore {
   constructor(private readonly db: Firestore) {}
 
-  async nearest(input: { kbVersion: string; vector: number[]; limit: number }) {
+  async nearest(input: { kbVersion: string; vector: number[]; limit: number; approved?: boolean }) {
     try {
       const snapshot = await this.db
         .collection(KB_CHUNKS_COLLECTION)
         .where('kbVersion', '==', input.kbVersion)
-        .where('approved', '==', true)
+        .where('approved', '==', input.approved ?? true)
         .findNearest({
           vectorField: EMBEDDING_FIELD,
           queryVector: input.vector,
@@ -332,6 +352,7 @@ export async function createSkillSearch(
       )
       .map((item) => item.doc);
   };
+  const access = skillSearchAccess(env, kb.manifest);
   const semantic = async (terms: string[]) => {
     const { embedder, chunks } = ensureVector();
     const [queryVector] = await embedder.embed([terms.join(' ')], 'RETRIEVAL_QUERY');
@@ -339,6 +360,7 @@ export async function createSkillSearch(
       kbVersion: kb.version,
       vector: queryVector!,
       limit: agent.searchSkillMaxPassages,
+      ...(access === 'unsigned' ? { approved: false } : {}),
     });
     const selected: { path: string; text: string }[] = [];
     for (const hit of hits) {
@@ -349,7 +371,7 @@ export async function createSkillSearch(
     return selected;
   };
   return async (query: string): Promise<string[]> => {
-    if (env['NODE_ENV'] === 'production' && kb.manifest.approvedBy.length === 0) return [];
+    if (access === 'closed') return [];
     const terms = [...new Set(words(query).filter((word) => documentFrequency.has(word)))];
     if (terms.length === 0) return [];
     if (vector) {

@@ -511,7 +511,7 @@ describe('artwork.created (story ending)', () => {
     expect((await t.push('/internal/events/artwork-created', ev)).status).toBe(204);
     const signals = await signalsOf(child.familyId, 'c_story_opt');
     expect(signals.map((s) => [s.signalDefId, s.extractedBy, s.scoring])).toEqual([
-      ['D-STORY-001', 'rule', 'score'],
+      ['D-STORY-001', 'rule', 'observe'],
     ]);
     expect(t.artworkLlm.requests).toHaveLength(0);
     expect(t.publisher.of('signal.extracted')).toEqual([

@@ -10,6 +10,6 @@ explicit: false
 method: rule
 metric: x_exam_flag
 evidence:
-  sources: [doc_backend_workers, doc_prd]
+  sources: [doc_backend_workers, doc_prd, mext_ijime_sign_hakken_sheet_2014, nier_ijime_tsuiseki_2013_2015, mext_jisatsu_yobou_tsuchi_r8_07]
   strength: low
 reviewed_by: 未定

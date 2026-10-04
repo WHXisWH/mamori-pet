@@ -1,7 +1,12 @@
 import { CONTEXT_CATEGORIES, DOMAINS, GRADE_BANDS, MOOD_WEATHERS } from '@ijime/api-types';
 import { z } from 'zod';
 
-export const reviewStatusSchema = z.enum(['draft_pending_expert_review', 'expert_approved']);
+// literature_reviewed: 出典を原文で確認し会話指針に対応づけた段階。専門家の署名はまだない。
+export const reviewStatusSchema = z.enum([
+  'draft_pending_expert_review',
+  'literature_reviewed',
+  'expert_approved',
+]);
 
 export const manifestSchema = z
   .object({
@@ -17,6 +22,13 @@ export const manifestSchema = z
         code: 'custom',
         path: ['approvedBy'],
         message: 'draft content cannot claim expert approval',
+      });
+    }
+    if (manifest.reviewStatus === 'literature_reviewed' && manifest.approvedBy.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['approvedBy'],
+        message: 'a literature review is not an expert approval',
       });
     }
     if (manifest.reviewStatus === 'expert_approved' && manifest.approvedBy.length === 0) {

@@ -9,6 +9,6 @@ method: rule
 scoring: observe
 metric: d_island_enclosed
 evidence:
-  sources: [doc_backend_workers]
+  sources: [doc_backend_workers, jankelowitz_sand_therapy_review_2026, wiersma_sandplay_meta_2022, lilienfeld_projective_techniques_2000]
   strength: low
 reviewed_by: 未定

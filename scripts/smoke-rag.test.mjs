@@ -89,7 +89,11 @@ test('configuration blocks missing project, other regions, drafts and absent ADC
     });
     assert.deepEqual(result, { status: 'blocked', category });
   }
-  for (const overrides of [{ approvedBy: [] }, { reviewStatus: 'draft_pending_expert_review' }]) {
+  for (const overrides of [
+    { approvedBy: [] },
+    { reviewStatus: 'draft_pending_expert_review' },
+    { reviewStatus: 'literature_reviewed' },
+  ]) {
     assert.equal(
       preflight(env, { ...io, readFileSync: () => JSON.stringify({ ...approved, ...overrides }) })
         .category,
@@ -169,7 +173,7 @@ test('empty collection blocks, unsupported vector search blocks, and lexical fal
   }
 });
 
-test('real bundled draft KB remains blocked by the probe without touching the store', async () => {
+test('real bundled unsigned KB remains blocked by the probe without touching the store', async () => {
   const { FsKbSource } = await import('../packages/kb-loader/dist/index.js');
   const kb = await Kb.load(new FsKbSource(fileURLToPath(new URL('../kb/v0.1.0', import.meta.url))));
   await assert.rejects(
@@ -177,7 +181,7 @@ test('real bundled draft KB remains blocked by the probe without touching the st
       env,
       kb,
       createSkillSearch,
-      { embedder, chunks: { nearest: () => assert.fail('draft must not reach cloud') } },
+      { embedder, chunks: { nearest: () => assert.fail('unsigned content must not reach cloud') } },
       agent.searchSkillMaxPassages,
     ),
     { message: 'kb_unapproved' },

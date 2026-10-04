@@ -13,6 +13,8 @@ import {
   kbChunkDocument,
   kbChunkId,
   normalizeVector,
+  skillSearchAccess,
+  UNSIGNED_SEARCH_ENV,
   VectorSearchUnsupportedError,
   vectorSearchEnabled,
   VertexEmbedder,
@@ -122,6 +124,117 @@ describe('lexical skill retrieval', () => {
     );
     expect(await search('無視')).toEqual([]);
     expect(chunks.nearest).not.toHaveBeenCalled();
+  });
+});
+
+describe('skill search access by review status', () => {
+  const production = { NODE_ENV: 'production' };
+  const optedIn = { NODE_ENV: 'production', [UNSIGNED_SEARCH_ENV]: 'literature_reviewed' };
+  const approved = { approvedBy: ['reviewer'], reviewStatus: 'expert_approved' };
+  const literature = { approvedBy: [], reviewStatus: 'literature_reviewed' };
+  const draft = { approvedBy: [], reviewStatus: 'draft_pending_expert_review' };
+
+  it('names the opt-in environment variable KB_UNSIGNED_SEARCH', () => {
+    expect(UNSIGNED_SEARCH_ENV).toBe('KB_UNSIGNED_SEARCH');
+  });
+
+  it.each([
+    ['an approved manifest in production', production, approved, 'signed'],
+    ['an approved manifest in production with the opt-in', optedIn, approved, 'signed'],
+    ['an approved manifest outside production', {}, approved, 'signed'],
+    ['a draft outside production', { NODE_ENV: 'test' }, draft, 'signed'],
+    ['a literature-reviewed KB outside production', {}, literature, 'signed'],
+    ['a draft in production', production, draft, 'closed'],
+    ['a draft in production with the opt-in', optedIn, draft, 'closed'],
+    [
+      'a manifest without a status in production with the opt-in',
+      optedIn,
+      { approvedBy: [] },
+      'closed',
+    ],
+    ['a literature-reviewed KB in production without the opt-in', production, literature, 'closed'],
+    [
+      'a literature-reviewed KB in production with another opt-in value',
+      { NODE_ENV: 'production', [UNSIGNED_SEARCH_ENV]: 'true' },
+      literature,
+      'closed',
+    ],
+    ['a literature-reviewed KB in production with the opt-in', optedIn, literature, 'unsigned'],
+  ] as const)('treats %s as %s', (_name, env, manifest, expected) => {
+    // Act
+    const access = skillSearchAccess(env, { ...manifest, approvedBy: [...manifest.approvedBy] });
+
+    // Assert
+    expect(access).toBe(expected);
+  });
+
+  const skillFiles = { 'skills/z.md': '# 音楽\n気持ち 沈黙' };
+  const hit = { skillId: 'z', chunkIndex: 0, text: '気持ち 沈黙', distance: 0.1 };
+  const searchWith = (
+    env: NodeJS.ProcessEnv,
+    manifest: { approvedBy: readonly string[]; reviewStatus?: string },
+    chunks: KbChunkStore,
+  ) =>
+    createSkillSearch({ ...fixture(skillFiles), manifest } as unknown as Kb, env, {
+      chunks,
+      embedder: new FakeEmbedder(),
+    });
+
+  it.each([
+    ['a draft in production', production, draft],
+    ['a draft in production with the opt-in', optedIn, draft],
+    ['a literature-reviewed KB in production without the opt-in', production, literature],
+  ] as const)(
+    'returns nothing and never queries the store for %s',
+    async (_name, env, manifest) => {
+      // Arrange
+      const chunks = store([hit]);
+      const search = await searchWith(env, manifest, chunks);
+
+      // Act
+      const passages = await search('沈黙');
+
+      // Assert
+      expect(passages).toEqual([]);
+      expect(chunks.nearest).not.toHaveBeenCalled();
+    },
+  );
+
+  it('queries only unsigned chunks for an opted-in literature-reviewed KB in production', async () => {
+    // Arrange
+    const chunks = store([hit]);
+    const search = await searchWith(optedIn, literature, chunks);
+
+    // Act
+    const passages = await search('沈黙');
+
+    // Assert
+    expect(paths(passages)).toEqual(['skills/z.md']);
+    expect(chunks.nearest).toHaveBeenCalledTimes(1);
+    expect(chunks.nearest).toHaveBeenCalledWith({
+      kbVersion: 'test1',
+      vector: expect.any(Array),
+      limit: agent.searchSkillMaxPassages,
+      approved: false,
+    });
+  });
+
+  it.each([
+    ['an approved manifest in production', production, approved],
+    ['an approved manifest in production with the opt-in', optedIn, approved],
+    ['a literature-reviewed KB outside production', { NODE_ENV: 'test' }, literature],
+  ] as const)('queries approved-only chunks for %s', async (_name, env, manifest) => {
+    // Arrange
+    const chunks = store([hit]);
+    const search = await searchWith(env, manifest, chunks);
+
+    // Act
+    const passages = await search('沈黙');
+
+    // Assert
+    expect(paths(passages)).toEqual(['skills/z.md']);
+    expect(chunks.nearest).toHaveBeenCalledTimes(1);
+    expect(chunks.nearest.mock.calls[0]![0]).not.toHaveProperty('approved');
   });
 });
 
@@ -391,6 +504,39 @@ describe('Firestore kbChunks store (emulator)', () => {
     expect(await chunks.nearest({ kbVersion: 'none', vector: vector!, limit: 3 })).toEqual([]);
     const search = await createSkillSearch(fixture(files), {}, { chunks, embedder });
     expect(paths(await search('音楽 沈黙'))[0]).toBe('skills/z.md');
+  });
+
+  it('returns unsigned chunks only when approved=false is requested', async () => {
+    // Arrange
+    const embedder = new FakeEmbedder(16);
+    const kbVersion = 'unsigned1';
+    const [chunk] = chunkSkill('skills/z.md', '# 音楽\n\n## 場面\n\n気持ち 沈黙 音楽');
+    const [stored] = await embedder.embed([chunk!.embeddingInput], 'RETRIEVAL_DOCUMENT');
+    await db
+      .collection(KB_CHUNKS_COLLECTION)
+      .doc(kbChunkId(kbVersion, chunk!.skillId, chunk!.chunkIndex))
+      .set(
+        kbChunkDocument(chunk!, stored!, {
+          kbVersion,
+          approved: false,
+          embeddingModel: embedder.model,
+        }),
+      );
+    const chunks = new FirestoreKbChunkStore(db);
+    const [vector] = await embedder.embed(['音楽 沈黙'], 'RETRIEVAL_QUERY');
+
+    // Act
+    const signedOnly = await chunks.nearest({ kbVersion, vector: vector!, limit: 3 });
+    const unsigned = await chunks.nearest({
+      kbVersion,
+      vector: vector!,
+      limit: 3,
+      approved: false,
+    });
+
+    // Assert
+    expect(signedOnly).toEqual([]);
+    expect(unsigned.map((item) => item.skillId)).toEqual(['z']);
   });
 
   it.each([

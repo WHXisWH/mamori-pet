@@ -23,6 +23,6 @@ examples_ja:
 grade_bands: [low, high, jhs]
 explicit: true
 evidence:
-  sources: [mext_problem_behavior_survey, prefectural_checklists]
+  sources: [mext_mondai_chousa_r6, tokyo_ijime_sougou_taisaku_checksheet_2014, ijime_boushi_taisaku_suishin_hou, mext_ijime_sign_hakken_sheet_2014, wakayama_ijime_taiou_manual_2024, moore_2017_consequences_meta, casper_card_2017_overt_relational_meta, osuka_2019_japan_ijime_scale]
   strength: medium
 reviewed_by: 未定
