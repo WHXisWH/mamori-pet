@@ -1,11 +1,14 @@
 'use client';
 
-import type { CharacterId } from '@ijime/api-types';
+import type { CharacterId, CharactersRes } from '@ijime/api-types';
 import { Button, CHARACTER_META, PetAvatar, SELECTABLE_CHARACTERS, SpeechBubble } from '@ijime/ui';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { COPY } from '@/lib/copy';
 import { useChildStore } from '@/lib/store';
+import { childRequest } from '@/lib/api';
+import { FuriganaText } from './FuriganaText';
+import { ReadAloudButton } from './requests/ReadAloudButton';
 
 export function CharacterPicker({
   onChoose,
@@ -19,7 +22,29 @@ export function CharacterPicker({
   const [picked, setPicked] = useState<CharacterId>('moko');
   const [name, setName] = useState('');
   const [hatching, setHatching] = useState(false);
+  const [characters, setCharacters] = useState<CharactersRes['items']>([]);
+  const [loading, setLoading] = useState(true);
   const meta = CHARACTER_META[picked];
+  const introduction = picked === 'hidden' ? copy.egg : `「${meta.tagline}」`;
+
+  useEffect(() => {
+    let cancelled = false;
+    void childRequest<CharactersRes>('/v1/child/characters')
+      .then((result) => {
+        if (!cancelled) setCharacters(result.items);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const available = characters.length
+    ? characters.map((item) => item.characterId)
+    : SELECTABLE_CHARACTERS;
 
   return (
     <div
@@ -27,32 +52,41 @@ export function CharacterPicker({
       data-testid="character-picker"
       data-picked={picked}
     >
-      <h1 className="font-display text-2xl font-bold">{copy.title}</h1>
+      <h1 className="font-display text-2xl font-bold">
+        <FuriganaText text={copy.title} enabled={gradeBand === 'low'} />
+      </h1>
       <SpeechBubble tail="bottom" className="text-center">
-        {picked === 'hidden' ? copy.egg : `「${meta.tagline}」`}
+        <FuriganaText text={introduction} enabled={gradeBand === 'low'} />
       </SpeechBubble>
       <div key={picked} className={hatching ? 'animate-bob' : 'animate-pop'}>
         <PetAvatar characterId={picked} expression={hatching ? 'sleepy' : 'happy'} size={180} />
       </div>
-      <p className="text-center text-sm text-ink-soft">{meta.personality}</p>
+      <p className="text-center text-sm text-ink-soft">
+        <FuriganaText text={meta.personality} enabled={gradeBand === 'low'} />
+      </p>
+      <ReadAloudButton text={`${introduction} ${meta.personality}`} />
       <ul className="grid w-full grid-cols-3 gap-3" aria-label="なかま">
-        {[...SELECTABLE_CHARACTERS, 'hidden' as const].map((id) => (
-          <li key={id}>
-            <button
-              type="button"
-              data-testid={`pick-${id}`}
-              aria-pressed={picked === id}
-              aria-label={CHARACTER_META[id].displayName}
-              disabled={busy || id === 'hidden'}
-              title={id === 'hidden' ? 'いまは えらべません' : undefined}
-              onClick={() => setPicked(id)}
-              className={`flex w-full flex-col items-center rounded-card p-2 transition ${picked === id ? 'bg-white shadow-lift ring-4 ring-calm' : 'bg-white/60 hover:bg-white'}`}
-            >
-              <PetAvatar characterId={id} size={64} animate={false} />
-              <span className="mt-1 text-sm font-bold">{CHARACTER_META[id].displayName}</span>
-            </button>
-          </li>
-        ))}
+        {[...available.filter((id) => id !== 'hidden'), 'hidden' as const].map((id) => {
+          const locked =
+            characters.find((item) => item.characterId === id)?.locked ?? id === 'hidden';
+          return (
+            <li key={id}>
+              <button
+                type="button"
+                data-testid={`pick-${id}`}
+                aria-pressed={picked === id}
+                aria-label={CHARACTER_META[id].displayName}
+                disabled={busy || loading || locked}
+                title={locked ? '島で もうすこし すごすと えらべます' : undefined}
+                onClick={() => setPicked(id)}
+                className={`flex w-full flex-col items-center rounded-card p-2 transition ${picked === id ? 'bg-white shadow-lift ring-4 ring-calm' : 'bg-white/60 hover:bg-white'}`}
+              >
+                <PetAvatar characterId={id} size={64} animate={false} />
+                <span className="mt-1 text-sm font-bold">{CHARACTER_META[id].displayName}</span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <label className="w-full">
         <span className="text-sm font-bold text-ink-soft">{copy.name}</span>

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { guardianRequest } from '@/lib/api';
 import { ApiFailure, control, field, useGuardian } from './GuardianShell';
+import { PushRegistration } from './PushRegistration';
 
 const channels: { id: NotifyChannel; label: string; Icon: typeof Bell }[] = [
   { id: 'webpush', label: 'ブラウザ通知', Icon: Bell },
@@ -117,9 +118,7 @@ export function NotificationSettings() {
         <p className="border-l-2 border-amber-500 pl-3 text-sm leading-6 text-ink/75">
           緊急のお知らせには、通常の通知設定にかかわらず登録済みの連絡先が使われることがあります。電話番号の本人確認・送信確認はまだ行われていません。
         </p>
-        <p className="text-sm text-ink/65" data-testid="push-unconfigured">
-          この環境ではブラウザ通知の受信登録は未設定です。
-        </p>
+        <PushRegistration />
         {saveError && (
           <p role="alert" className="text-sm text-alert">
             保存の完了を確認できませんでした。入力内容を確認して、もう一度保存してください。

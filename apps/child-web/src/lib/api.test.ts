@@ -1,5 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { ChildApiError, childRequest, devHeaders } from './api';
+import { ChildApiError, childFetch, childRequest, devHeaders } from './api';
+
+vi.mock('./app-check', () => ({
+  childAppCheckToken: vi.fn(async (forceRefresh = false) =>
+    forceRefresh ? 'fresh-app-check' : 'initial-app-check',
+  ),
+}));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -40,4 +46,22 @@ it('accepts an empty DELETE response without parsing nonexistent JSON', async ()
   await expect(
     childRequest('/v1/child/memories/m_1', { method: 'DELETE' }),
   ).resolves.toBeUndefined();
+});
+
+it('refreshes App Check when auth is not present but the App Check token expired', async () => {
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY', 'test-site-key');
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(new Response(null, { status: 401 }))
+    .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+  vi.stubGlobal('fetch', fetch);
+  const response = await childFetch('/v1/child/home', {
+    headers: { 'X-Firebase-AppCheck': 'expired-app-check' },
+  });
+  expect(response.status).toBe(200);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(new Headers(fetch.mock.calls[1]?.[1]?.headers).get('X-Firebase-AppCheck')).toBe(
+    'fresh-app-check',
+  );
 });

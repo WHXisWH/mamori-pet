@@ -109,9 +109,13 @@ test.describe('activities', () => {
       'data-status',
       /sending|streaming/,
     );
-    await expect(page.getByTestId('offer-tell-adult')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('chat-panel')).toHaveAttribute('data-status', 'idle');
     await expect(page.getByTestId('msg-pet').last()).toContainText('つらかったね');
+    await expect(page.getByTestId('offer-tell-adult')).toHaveCount(0);
+    await page.getByTestId('chat-input').fill('おとなに はなしたい');
+    await page.getByTestId('chat-send').click();
+    await expect(page.getByTestId('offer-tell-adult')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('chat-panel')).toHaveAttribute('data-status', 'idle');
 
     await page.getByTestId('chat-input').fill('もう 消えたい');
     await page.getByTestId('chat-send').click();
@@ -119,7 +123,9 @@ test.describe('activities', () => {
     await expect(page.getByTestId('safe-mode')).toBeVisible();
     await expect(page.getByTestId('safe-mode')).toContainText('あなたの安全がいちばん大事');
     await expect(page.getByTestId('safe-mode')).not.toContainText('おうちの人に知らせるね');
-    await expect(page.getByTestId('safe-call')).toHaveCount(2);
+    await expect(page.getByTestId('safe-call')).toHaveCount(4);
+    await expect(page.locator('[data-testid="safe-call"][href="tel:110"]')).toBeVisible();
+    await expect(page.locator('[data-testid="safe-call"][href="tel:119"]')).toBeVisible();
     await expect(page.getByTestId('safe-call').first()).toHaveAttribute('href', 'tel:0120078310');
     await page.getByTestId('adult-yes').click();
     await page.getByTestId('safe-back').click();

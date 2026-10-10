@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { COPY } from '@/lib/copy';
 import { useChildStore } from '@/lib/store';
 import { distanceM, readGeofence } from '@/lib/home-location';
+import { ReadAloudButton } from './requests/ReadAloudButton';
 
 export type HomeCheckinResult = { atHome: boolean; method: 'geo' | 'manual' };
 
@@ -66,6 +67,7 @@ export function HomeCheckinPrompt({
   return (
     <Card className="mx-4 -mt-4 text-center" data-testid="home-checkin">
       <p className="font-display text-lg font-bold">{copy.ask}</p>
+      <ReadAloudButton text={copy.ask} className="mx-auto mt-1" />
       {mode === 'checking' ? (
         <p className="mt-2 text-sm text-ink-soft" aria-busy="true">
           …

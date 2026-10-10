@@ -1,11 +1,12 @@
 'use client';
 
 import { DATA_SOURCES, type DataSource } from '@ijime/api-types';
-import { Button, PetAvatar, RuleCard } from '@ijime/ui';
+import { Button, PetAvatar, RuleCard, RULE_CARD_LINES, RULE_CARD_TITLE } from '@ijime/ui';
 import { useState } from 'react';
 
 import { COPY, DATA_SOURCE_LABELS } from '@/lib/copy';
 import { DEFAULT_DATA_SOURCES, useChildStore } from '@/lib/store';
+import { ReadAloudButton } from './requests/ReadAloudButton';
 
 export function AssentStorybook({
   onAgree,
@@ -21,6 +22,14 @@ export function AssentStorybook({
   const pages = copy.pages;
   const last = page === pages.length;
   const current = pages[page];
+  const readText = last
+    ? [
+        COPY[gradeBand].settings.sources,
+        ...DATA_SOURCES.map((key) => DATA_SOURCE_LABELS[gradeBand][key]),
+      ].join('。')
+    : page === 1
+      ? [RULE_CARD_TITLE[gradeBand], ...RULE_CARD_LINES[gradeBand]].join('\n')
+      : `${current?.title ?? ''} ${current?.body ?? ''}`;
 
   return (
     <div
@@ -74,6 +83,7 @@ export function AssentStorybook({
           </ul>
         </>
       )}
+      <ReadAloudButton text={readText} />
       <Button
         size="xl"
         className="w-full"

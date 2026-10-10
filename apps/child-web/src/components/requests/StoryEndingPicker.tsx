@@ -7,6 +7,7 @@ import { useState } from 'react';
 
 import { REQUEST_COPY } from '@/lib/copy-requests';
 
+import { FuriganaText } from '../FuriganaText';
 import { ReadAloudButton } from './ReadAloudButton';
 import { useSpeechRecognition } from './use-speech-recognition';
 
@@ -33,7 +34,9 @@ export function StoryEndingPicker({
 
   return (
     <div className="flex flex-col gap-4" data-testid="story-ending-picker" data-grade={gradeBand}>
-      <p className="font-display text-center text-lg font-bold">{copy.story.pickTitle}</p>
+      <p className="font-display text-center text-lg font-bold">
+        <FuriganaText text={copy.story.pickTitle} enabled={gradeBand === 'low'} />
+      </p>
       <div role="group" aria-label={copy.story.pickTitle} className="flex flex-col gap-3">
         {options.map((option) => (
           <div key={option.id} className="flex items-stretch gap-2">
@@ -44,7 +47,7 @@ export function StoryEndingPicker({
               onClick={() => onDone({ mode: 'option', text: option.text })}
               className="grade-tap tap-target flex-1 rounded-card border-4 border-transparent bg-white px-4 py-4 text-left text-lg font-bold leading-relaxed shadow-soft transition hover:-translate-y-0.5 hover:border-calm hover:shadow-lift focus-visible:outline-4 focus-visible:outline-calm-deep disabled:opacity-50"
             >
-              {option.text}
+              <FuriganaText text={option.text} enabled={gradeBand === 'low'} />
             </button>
             <ReadAloudButton text={option.text} className="self-center" />
           </div>

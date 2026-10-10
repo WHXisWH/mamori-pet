@@ -54,7 +54,7 @@ function worker() {
   const caches = {
     open: vi.fn(async (_name: string) => cache),
     match,
-    keys: vi.fn(async () => ['shell-v1', 'api-v1', 'shell-v2', 'api-v2']),
+    keys: vi.fn(async () => ['shell-v1', 'api-v1', 'shell-v2', 'api-v2', 'shell-v3', 'api-v3']),
     delete: vi.fn(async (_name: string) => true),
   };
   const fetch = vi.fn(async (_request: Request) => html());
@@ -88,9 +88,11 @@ function worker() {
 
 describe('service worker offline cache', () => {
   const routes = [
-    { path: '/_next/static/chunk.js', navigate: false, cacheName: 'shell-v2' },
-    { path: '/help', navigate: true, cacheName: 'shell-v2' },
-    { path: 'https://api.test/v1/child/help-resources', navigate: false, cacheName: 'api-v2' },
+    { path: '/_next/static/chunk.js', navigate: false, cacheName: 'shell-v3' },
+    { path: '/help', navigate: true, cacheName: 'shell-v3' },
+    { path: 'https://api.test/v1/child/help-resources', navigate: false, cacheName: 'api-v3' },
+    { path: '/reading-worker.js', navigate: false, cacheName: 'shell-v3' },
+    { path: '/readings/kuromoji-0.1.2/dict/tid.dat.gz', navigate: false, cacheName: 'shell-v3' },
   ];
 
   it.each(routes)(
@@ -239,17 +241,22 @@ describe('service worker offline cache', () => {
     }
   });
 
-  it('precaches the safety pages and removes v1 caches during activation', async () => {
+  it('precaches the safety pages and removes old caches during activation', async () => {
     const sw = worker();
     await sw.dispatch('install').done();
-    expect(sw.caches.open).toHaveBeenCalledWith('shell-v2');
+    expect(sw.caches.open).toHaveBeenCalledWith('shell-v3');
     expect(sw.cache.addAll).toHaveBeenCalledWith(
       expect.arrayContaining(['/help', '/safe', '/offline']),
     );
     expect(sw.self.skipWaiting).toHaveBeenCalledOnce();
 
     await sw.dispatch('activate').done();
-    expect(sw.caches.delete.mock.calls).toEqual([['shell-v1'], ['api-v1']]);
+    expect(sw.caches.delete.mock.calls).toEqual([
+      ['shell-v1'],
+      ['api-v1'],
+      ['shell-v2'],
+      ['api-v2'],
+    ]);
     expect(sw.self.clients.claim).toHaveBeenCalledOnce();
   });
 

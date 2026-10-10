@@ -2,6 +2,7 @@
 
 import { NotificationList } from '@/components/Notifications';
 import { ChildPicker, useGuardian } from '@/components/GuardianShell';
+import { InstallHint } from '@/components/PushRegistration';
 import { WeeklyReport } from '@/components/WeeklyReport';
 
 export default function HomePage() {
@@ -11,6 +12,7 @@ export default function HomePage() {
       <ChildPicker />
       {childId && me?.family.consentComplete && <WeeklyReport key={childId} childId={childId} />}
       <NotificationList childId={childId} />
+      <InstallHint />
       <section className="mt-8 border-t border-ink/10 py-5">
         <h2 className="font-bold">緊急のときは</h2>
         <p className="mt-2 text-sm">

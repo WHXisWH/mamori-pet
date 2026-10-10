@@ -4,6 +4,8 @@ import type { MemoryProposalDecisionRes, MemoryProposalsRes } from '@ijime/api-t
 import { Button } from '@ijime/ui';
 import { useState } from 'react';
 import { childRequest } from '@/lib/api';
+import { useChildStore } from '@/lib/store';
+import { FuriganaText } from './FuriganaText';
 import { RequestError } from './RequestError';
 
 export function MemoryProposal({
@@ -11,6 +13,7 @@ export function MemoryProposal({
 }: {
   proposal: Pick<MemoryProposalsRes['items'][number], 'proposalId' | 'text' | 'category'>;
 }) {
+  const gradeBand = useChildStore((s) => s.gradeBand);
   const [status, setStatus] = useState<'pending' | 'saved' | 'rejected'>('pending');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -38,7 +41,9 @@ export function MemoryProposal({
       {status === 'pending' ? (
         <>
           <p className="font-bold">おぼえても いい？</p>
-          <p className="my-2 break-words">{proposal.text}</p>
+          <p className="my-2 break-words">
+            <FuriganaText text={proposal.text} enabled={gradeBand === 'low'} />
+          </p>
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={busy}

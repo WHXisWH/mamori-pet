@@ -6,6 +6,7 @@ import { Button, PetAvatar, SpeechBubble } from '@ijime/ui';
 import { REQUEST_COPY } from '@/lib/copy-requests';
 import { useChildStore } from '@/lib/store';
 
+import { FuriganaText } from '../FuriganaText';
 import { ReadAloudButton, useAutoReadAloud } from './ReadAloudButton';
 import { IslandSprite, islandItemLabel } from './sprite-fallback';
 
@@ -26,6 +27,7 @@ export function PetRequestIntro({
 }) {
   const { gradeBand, characterId } = useChildStore();
   const copy = REQUEST_COPY[gradeBand];
+  const furigana = gradeBand === 'low';
   const intro = copy.intro[request.type];
   useAutoReadAloud(`${intro} ${request.promptText}`);
   return (
@@ -36,7 +38,7 @@ export function PetRequestIntro({
     >
       <div className="flex w-full items-start justify-center gap-2">
         <SpeechBubble tail="bottom" className="text-left">
-          {intro}
+          <FuriganaText text={intro} enabled={furigana} />
         </SpeechBubble>
         <ReadAloudButton text={intro} className="shrink-0" />
       </div>
@@ -50,7 +52,7 @@ export function PetRequestIntro({
         data-testid="request-prompt"
       >
         <p className="font-display flex-1 text-lg font-bold leading-relaxed">
-          {request.promptText}
+          <FuriganaText text={request.promptText} enabled={furigana} />
         </p>
         <ReadAloudButton text={request.promptText} className="shrink-0" />
       </div>

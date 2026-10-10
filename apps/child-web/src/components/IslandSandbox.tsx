@@ -8,6 +8,7 @@ import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { IslandGround, IslandSprite } from '@/components/island/sprites';
 import { COPY } from '@/lib/copy';
 import { useChildStore } from '@/lib/store';
+import { FuriganaText } from './FuriganaText';
 
 const MAX_ITEMS = 60;
 const KEY_STEP = client.islandKeyStep;
@@ -241,7 +242,9 @@ export function IslandSandbox({
                 }`}
               >
                 <IslandSprite id={c.catalogId} size={40} />
-                <span>{c.label}</span>
+                <span>
+                  <FuriganaText text={c.label} enabled={gradeBand === 'low'} />
+                </span>
                 {c.locked && (
                   <span aria-hidden="true" className="text-[0.65rem] text-ink-soft">
                     🔒 {copy.locked}

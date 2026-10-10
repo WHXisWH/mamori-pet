@@ -1,16 +1,25 @@
 import type { PetAction, VoiceServerMessage, VoiceTicketRes } from '@ijime/api-types';
-import { childRequest } from './api';
+import { ChildApiError, childRequest } from './api';
 import { BrowserVoiceAudio, type VoiceAudio } from './voice-audio';
 
 export type VoiceStatus = 'idle' | 'connecting' | 'listening' | 'reconnecting';
+// limit：その日の音声の分数を使い切った。unavailable：音声が全体で無効化されている
+export type VoiceFailure = 'error' | 'limit' | 'unavailable';
 export type VoiceHandlers = {
   onStatus: (status: VoiceStatus) => void;
   onChildText: (text: string, final: boolean) => void;
   onPetText: (text: string) => void;
   onAction: (action: PetAction) => void;
   onCrisis: (crisis: Extract<VoiceServerMessage, { type: 'crisis' }>) => void;
-  onError: () => void;
+  onError: (failure: VoiceFailure) => void;
 };
+function ticketFailure(error: unknown): VoiceFailure {
+  if (!(error instanceof ChildApiError)) return 'error';
+  if (error.code === 'RATE_LIMITED') return 'limit';
+  if (error.code === 'MODEL_UNAVAILABLE') return 'unavailable';
+  return 'error';
+}
+
 type Dependencies = {
   ticket: () => Promise<VoiceTicketRes>;
   socket: (url: string) => WebSocket;
@@ -51,8 +60,8 @@ export class VoiceClient {
         this.socket.send(pcm);
       });
       if (!this.stopped) await this.connect();
-    } catch {
-      if (!this.stopped) this.fail();
+    } catch (error) {
+      if (!this.stopped) this.fail(ticketFailure(error));
     }
   }
 
@@ -107,7 +116,12 @@ export class VoiceClient {
             this.handlers.onCrisis(message);
             break;
           case 'end':
-            if (message.reason === 'error') this.fail();
+            if (
+              message.reason === 'error' ||
+              message.reason === 'limit' ||
+              message.reason === 'unavailable'
+            )
+              this.fail(message.reason);
             else this.stop();
             break;
           default:
@@ -128,14 +142,14 @@ export class VoiceClient {
       }
       this.handlers.onStatus('reconnecting');
       this.timer = setTimeout(() => this.fail(), 5000);
-      void this.connect().catch(() => this.fail());
+      void this.connect().catch((error: unknown) => this.fail(ticketFailure(error)));
     };
   }
 
-  private fail(): void {
+  private fail(failure: VoiceFailure = 'error'): void {
     if (this.stopped) return;
     this.stop();
-    this.handlers.onError();
+    this.handlers.onError(failure);
   }
 
   stop(): void {

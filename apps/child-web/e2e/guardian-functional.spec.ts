@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { RULE_CARD_LINES } from '@ijime/ui';
 
 const API = process.env['NEXT_PUBLIC_API_BASE_URL'] ?? 'http://localhost:8080';
 const GUARDIAN = process.env['PW_GUARDIAN_URL'] ?? 'http://localhost:3101';
@@ -40,6 +41,32 @@ async function family(page: Page) {
   await page.getByTestId('guardian-child-select').selectOption(children[0]!.childId);
   return { headers, children, guardianId };
 }
+
+test('guardian settings displays the same five rules as the child, including family safety', async ({
+  page,
+}, testInfo) => {
+  await family(page);
+  await page.goto(`${GUARDIAN}/settings`);
+  const card = page.getByTestId('rule-card');
+  await expect(card).toBeVisible();
+  await expect(card.locator('li')).toHaveCount(5);
+  for (const line of RULE_CARD_LINES.jhs) await expect(card).toContainText(line);
+  for (const [width, height] of [
+    [393, 852],
+    [1440, 900],
+  ]) {
+    await page.setViewportSize({ width: width!, height: height! });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: testInfo.outputPath(`guardian-rules-${width}.png`),
+      fullPage: true,
+    });
+  }
+  await page.reload();
+  await expect(card.locator('li')).toHaveCount(5);
+});
 
 test('guardian selects children and creates/removes real multi-child context without invented weekly data', async ({
   page,

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChildApiError } from './api';
 import { VoiceClient, type VoiceHandlers } from './voice-client';
 import type { VoiceAudio } from './voice-audio';
 
@@ -112,6 +113,35 @@ describe('voice protocol', () => {
     await denied.client.start();
     expect(denied.handlers.onError).toHaveBeenCalledOnce();
     expect(denied.ticket).not.toHaveBeenCalled();
+  });
+
+  it('reports the daily limit and global voice-off separately from connection errors', async () => {
+    const limited = setup();
+    await limited.client.start();
+    limited.sockets[0]!.emit({ type: 'end', reason: 'limit' });
+    expect(limited.handlers.onError).toHaveBeenCalledWith('limit');
+    expect(limited.audio.close).toHaveBeenCalledOnce();
+
+    const off = setup();
+    await off.client.start();
+    off.sockets[0]!.emit({ type: 'end', reason: 'unavailable' });
+    expect(off.handlers.onError).toHaveBeenCalledWith('unavailable');
+
+    const refused = setup();
+    refused.ticket.mockRejectedValueOnce(new ChildApiError('RATE_LIMITED', 429));
+    await refused.client.start();
+    expect(refused.handlers.onError).toHaveBeenCalledWith('limit');
+    expect(refused.socket).not.toHaveBeenCalled();
+
+    const disabled = setup();
+    disabled.ticket.mockRejectedValueOnce(new ChildApiError('MODEL_UNAVAILABLE', 503));
+    await disabled.client.start();
+    expect(disabled.handlers.onError).toHaveBeenCalledWith('unavailable');
+
+    const broken = setup();
+    broken.ticket.mockRejectedValueOnce(new ChildApiError('INTERNAL', 500));
+    await broken.client.start();
+    expect(broken.handlers.onError).toHaveBeenCalledWith('error');
   });
 
   it('does not open a late socket after stop while the ticket is pending', async () => {

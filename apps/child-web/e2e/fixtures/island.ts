@@ -131,9 +131,13 @@ export type IslandRoutes = {
   requests: Request[];
 };
 
-export async function seedChild(page: Page, gradeBand: 'low' | 'high' | 'jhs' = 'high') {
+export async function seedChild(
+  page: Page,
+  gradeBand: 'low' | 'high' | 'jhs' = 'high',
+  options: { readAloud?: boolean } = {},
+) {
   await page.addInitScript(
-    ({ grade, childId }) => {
+    ({ grade, childId, readAloud }) => {
       localStorage.setItem(
         'mamori-child',
         JSON.stringify({
@@ -145,7 +149,7 @@ export async function seedChild(page: Page, gradeBand: 'low' | 'high' | 'jhs' = 
             characterId: 'moko',
             petName: 'もこ',
             petLock: null,
-            readAloud: false,
+            readAloud,
             todayMood: null,
             lastHomeCheckin: null,
             dataSources: {
@@ -160,7 +164,7 @@ export async function seedChild(page: Page, gradeBand: 'low' | 'high' | 'jhs' = 
         }),
       );
     },
-    { grade: gradeBand, childId: FIXTURE_CHILD_ID },
+    { grade: gradeBand, childId: FIXTURE_CHILD_ID, readAloud: options.readAloud ?? false },
   );
 }
 

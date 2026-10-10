@@ -7,6 +7,8 @@ import Link from 'next/link';
 import { IslandSprite } from '@/components/island/sprites';
 import { COPY } from '@/lib/copy';
 import { useChildStore } from '@/lib/store';
+import { FuriganaText } from './FuriganaText';
+import { ReadAloudButton } from './requests/ReadAloudButton';
 
 export function PetRequestCard({
   request,
@@ -27,20 +29,21 @@ export function PetRequestCard({
       data-testid="pet-request-card"
       data-request-id={request.requestId}
       data-type={request.type}
-      className="mx-4 flex flex-col gap-3"
+      className="mx-4 flex flex-col gap-3 text-ink"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+        <div className="min-w-0 w-full flex-1">
           <p id={headingId} className="text-sm font-bold text-ink-soft">
             <span aria-hidden="true">💌 </span>
             {copy.heading[request.type]}
           </p>
           <p className="mt-1 font-display text-lg leading-relaxed font-bold" lang="ja">
-            {request.promptText}
+            <FuriganaText text={request.promptText} enabled={gradeBand === 'low'} />
           </p>
+          <ReadAloudButton text={request.promptText} className="mt-1" />
         </div>
         <div
-          className="flex shrink-0 flex-col items-center rounded-card bg-cream px-2 py-1"
+          className="flex shrink-0 items-center gap-2 rounded-card bg-cream px-2 py-1 sm:flex-col sm:gap-0"
           data-testid="pet-request-reward"
           data-item={request.rewardItemId}
         >

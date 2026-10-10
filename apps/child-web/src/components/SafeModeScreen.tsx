@@ -2,37 +2,44 @@
 
 import type { HelpResource } from '@ijime/api-types';
 import { Button, PetAvatar } from '@ijime/ui';
+import { Phone } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import safeCopy from '@/generated/safe_mode.json';
 import { COPY } from '@/lib/copy';
 import { useChildStore } from '@/lib/store';
+import { FuriganaText } from './FuriganaText';
+import { ReadAloudButton } from './requests/ReadAloudButton';
 
 function telHref(phone: string): string {
-  return `tel:${phone.split('/')[0]!.replace(/[^\d+]/g, '')}`;
+  return `tel:${phone.replace(/[^\d+]/g, '')}`;
 }
 
 export function SafeModeScreen({
   message,
   resources,
   familyHarm = false,
+  onConfirmSafe,
 }: {
   message?: string | undefined;
   resources: HelpResource[];
   familyHarm?: boolean;
+  /** 子どもが「安全」と答えた後、ホームに戻る前に行う処理（家庭内の危害の場合はサーバーに子どもの確認を登録する）。 */
+  onConfirmSafe?: (() => Promise<unknown>) | undefined;
 }) {
   const { gradeBand, characterId } = useChildStore();
   const copy = COPY[gradeBand].safe;
   const router = useRouter();
   const [adultNear, setAdultNear] = useState<boolean | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const lines = (familyHarm ? safeCopy.family_harm : safeCopy[gradeBand])
     .filter((l) => !l.startsWith('（'))
     .map((l) => l.replace(/（はい ?\/ ?いいえ）/g, '').trim());
   const primary = familyHarm
     ? resources.filter((r) => r.id === 'jidou_soudan' || r.id === 'emergency')
-    : resources.filter((r) => r.id === 'sos_dial' || r.id === 'childline');
+    : resources.filter((r) => r.id === 'sos_dial' || r.id === 'childline' || r.id === 'emergency');
 
   useEffect(() => {
     document.documentElement.dataset['night'] = 'false';
@@ -50,20 +57,44 @@ export function SafeModeScreen({
         role="status"
         aria-live="assertive"
       >
-        {message ? <p>{message}</p> : lines.map((l) => <p key={l}>{l}</p>)}
-      </div>
-      <div className="mt-8 flex w-full max-w-md flex-col gap-3">
-        {primary.map((r) => (
-          <a
-            key={r.id}
-            href={r.phone ? telHref(r.phone) : r.url}
-            data-testid="safe-call"
-            className="flex min-h-16 flex-col items-center justify-center rounded-card bg-leaf px-4 font-bold text-white shadow-soft hover:bg-leaf-deep focus-visible:outline-4 focus-visible:outline-calm-deep"
-          >
-            <span>📞 {r.name}</span>
-            {r.phone && <span className="text-sm opacity-90">{r.phone}</span>}
-          </a>
+        {(message ? [message] : lines).map((line) => (
+          <p key={line}>
+            <FuriganaText text={line} enabled={gradeBand === 'low'} />
+          </p>
         ))}
+      </div>
+      <ReadAloudButton text={message || lines.join('\n')} className="mt-3" />
+      <div className="mt-8 flex w-full max-w-md flex-col gap-3">
+        {primary.flatMap((r) =>
+          (r.phone
+            ? r.phone
+                .split('/')
+                .map((phone) => phone.trim())
+                .filter(Boolean)
+            : [undefined]
+          ).map((phone) => {
+            const name =
+              r.id === 'emergency' && phone === '110'
+                ? '警察'
+                : r.id === 'emergency' && phone === '119'
+                  ? '救急・消防'
+                  : r.name;
+            return (
+              <a
+                key={`${r.id}-${phone ?? 'web'}`}
+                href={phone ? telHref(phone) : r.url}
+                data-testid="safe-call"
+                className="flex min-h-16 flex-col items-center justify-center rounded-card bg-leaf px-4 font-bold text-white shadow-soft hover:bg-leaf-deep focus-visible:outline-4 focus-visible:outline-calm-deep"
+              >
+                <span className="flex items-center gap-2">
+                  <Phone aria-hidden="true" className="size-5 shrink-0" />
+                  <FuriganaText text={name} enabled={gradeBand === 'low'} />
+                </span>
+                {phone && <span className="text-sm opacity-90">{phone}</span>}
+              </a>
+            );
+          }),
+        )}
       </div>
       {!familyHarm && adultNear === null && (
         <div className="mt-8 w-full max-w-md">
@@ -114,7 +145,17 @@ export function SafeModeScreen({
               <Button
                 variant="primary"
                 data-testid="safe-confirm-yes"
-                onClick={() => router.push('/')}
+                disabled={leaving}
+                onClick={() => {
+                  setLeaving(true);
+                  // 登録に失敗しても先に子どもをホームへ戻す。次に相談の入口を開くときもサーバーはイベントの状態で判断するため、通過させることはない
+                  const goHome = () => router.push('/');
+                  if (!onConfirmSafe) {
+                    goHome();
+                    return;
+                  }
+                  onConfirmSafe().then(goHome, goHome);
+                }}
               >
                 {copy.confirmYes}
               </Button>

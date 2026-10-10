@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { COPY } from '@/lib/copy';
 import { useChildStore } from '@/lib/store';
 import { RequestError } from './RequestError';
+import { FuriganaText } from './FuriganaText';
 
 export type TellAdultResult =
   { choice: 'self' } | { choice: 'proxy'; summary: string } | { choice: 'not_now' };
@@ -53,11 +54,16 @@ export function TellAdultFlow({
       <SpeechBubble tail="bottom" className="text-center">
         {/* Keep a stable element when page translators replace its text node. */}
         <span>
-          {step === 'choose'
-            ? copy.intro
-            : step === 'coach'
-              ? (script[line] ?? copy.coachDone)
-              : copy.summaryTitle}
+          <FuriganaText
+            enabled={gradeBand === 'low'}
+            text={
+              step === 'choose'
+                ? copy.intro
+                : step === 'coach'
+                  ? (script[line] ?? copy.coachDone)
+                  : copy.summaryTitle
+            }
+          />
         </span>
       </SpeechBubble>
       <PetAvatar characterId={characterId ?? 'moko'} expression="caring" size={150} />

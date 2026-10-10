@@ -1,8 +1,9 @@
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `shell-${VERSION}`;
 const API_CACHE = `api-${VERSION}`;
+const PUSH_CACHE = 'child-push-v1';
 const SHELL_PAGES = ['/help', '/safe', '/offline', '/'];
-const PRECACHE = [...SHELL_PAGES, '/manifest.webmanifest', '/icons/icon.svg'];
+const PRECACHE = [...SHELL_PAGES, '/manifest.webmanifest', '/icons/icon.svg', '/push-copy.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -19,10 +20,58 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((k) => k !== SHELL_CACHE && k !== API_CACHE).map((k) => caches.delete(k)),
+          keys
+            .filter((k) => k !== SHELL_CACHE && k !== API_CACHE && k !== PUSH_CACHE)
+            .map((k) => caches.delete(k)),
         ),
       )
       .then(() => self.clients.claim()),
+  );
+});
+
+// FCM delivers data-only Web Push to the same worker used for offline safety pages.
+// Ignore all remote display text and URLs: the lock screen gets only bundled KB copy.
+self.addEventListener('push', (event) => {
+  event.waitUntil(
+    (async () => {
+      let data;
+      try {
+        data = event.data?.json()?.data;
+      } catch {
+        return;
+      }
+      if (data?.kind !== 'child_greeting' || typeof data.deviceId !== 'string') return;
+      const hour = (new Date().getUTCHours() + 9) % 24;
+      if (hour >= 23 || hour < 5) return;
+      const response = await (await caches.open(PUSH_CACHE)).match('/__child-push-binding');
+      if (!response || (await response.json()).deviceId !== data.deviceId) return;
+      const copy = await caches.match('/push-copy.json');
+      if (!copy) return;
+      const { title, body } = await copy.json();
+      if (typeof title !== 'string' || typeof body !== 'string') return;
+      await self.registration.showNotification(title, {
+        body,
+        icon: '/icons/icon.svg',
+        tag: 'child-greeting',
+        data: { path: '/' },
+      });
+    })(),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      // Never navigate to a link from a push payload (including same-origin query strings).
+      const home = new URL('/', self.location.origin).href;
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const client = clients.find((item) => new URL(item.url).origin === self.location.origin);
+      if (client) {
+        await client.navigate(home);
+        await client.focus();
+      } else await self.clients.openWindow(home);
+    })(),
   );
 });
 
@@ -31,11 +80,19 @@ function isHelpResourcesApi(url) {
 }
 
 function cacheResponse(event, cacheName, response) {
-  const contentType = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  const contentType = (response.headers.get('Content-Type') || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
   const isPage =
     cacheName === SHELL_CACHE &&
-    (event.request.mode === 'navigate' || SHELL_PAGES.includes(new URL(event.request.url).pathname));
-  if (!response.ok || contentType === 'text/x-component' || (isPage && contentType !== 'text/html')) {
+    (event.request.mode === 'navigate' ||
+      SHELL_PAGES.includes(new URL(event.request.url).pathname));
+  if (
+    !response.ok ||
+    contentType === 'text/x-component' ||
+    (isPage && contentType !== 'text/html')
+  ) {
     return;
   }
 
@@ -99,7 +156,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/_next/static/') || PRECACHE.includes(url.pathname)) {
+  if (
+    url.pathname.startsWith('/_next/static/') ||
+    url.pathname.startsWith('/readings/') ||
+    url.pathname === '/reading-worker.js' ||
+    PRECACHE.includes(url.pathname)
+  ) {
     event.respondWith(
       caches
         .match(request)

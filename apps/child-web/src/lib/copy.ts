@@ -63,6 +63,7 @@ type Copy = {
     fromPet: string;
     visitDays: string;
     tell: string;
+    careHotline: string;
   };
   request: {
     heading: Record<'drawing' | 'story' | 'pet_worry', string>;
@@ -124,6 +125,7 @@ type Copy = {
     lock: string;
     grade: string;
     readAloud: string;
+    proactive: string;
     deleteAll: string;
     deleted: string;
   };
@@ -215,6 +217,7 @@ export const COPY: Record<GradeBand, Copy> = {
       fromPet: 'ペットから',
       visitDays: 'きた ひ {n}にち',
       tell: 'おうちの ひとに つたえたい こと',
+      careHotline: 'こまったら ここに でんわ できるよ',
     },
     request: {
       heading: {
@@ -305,6 +308,7 @@ export const COPY: Record<GradeBand, Copy> = {
       lock: 'ペットの あいことば',
       grade: 'がくねん',
       readAloud: 'よみあげ',
+      proactive: 'ペットからの あいさつ',
       deleteAll: 'ぜんぶ けす',
       deleted: 'けす おねがいを おくったよ',
     },
@@ -393,6 +397,7 @@ export const COPY: Record<GradeBand, Copy> = {
       fromPet: 'ペットから',
       visitDays: '来た日 {n}日',
       tell: 'おうちの人に伝えたいこと',
+      careHotline: '困ったらここに電話できるよ',
     },
     request: {
       heading: {
@@ -480,6 +485,7 @@ export const COPY: Record<GradeBand, Copy> = {
       lock: 'ペットの合言葉',
       grade: '学年',
       readAloud: '読み上げ',
+      proactive: 'ペットからの挨拶',
       deleteAll: '全部消す',
       deleted: '消すお願いを送ったよ',
     },
@@ -568,6 +574,7 @@ export const COPY: Record<GradeBand, Copy> = {
       fromPet: 'ペットから',
       visitDays: '来た日 {n}日',
       tell: '家の人に伝えたいこと',
+      careHotline: '困ったらここに電話できるよ',
     },
     request: {
       heading: {
@@ -658,6 +665,7 @@ export const COPY: Record<GradeBand, Copy> = {
       lock: 'ペットの合言葉',
       grade: '学年',
       readAloud: '読み上げ',
+      proactive: 'ペットからの挨拶',
       deleteAll: 'すべて削除',
       deleted: '削除のリクエストを送った',
     },

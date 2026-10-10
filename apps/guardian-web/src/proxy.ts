@@ -10,7 +10,7 @@ export function buildCsp(nonce: string): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    `connect-src 'self' ${API_BASE_URL} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://fcmregistrations.googleapis.com`,
+    `connect-src 'self' ${API_BASE_URL} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://fcmregistrations.googleapis.com https://firebaseinstallations.googleapis.com`,
     "worker-src 'self'",
     "manifest-src 'self'",
     "frame-ancestors 'none'",

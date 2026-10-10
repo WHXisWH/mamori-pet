@@ -8,6 +8,7 @@ import { COPY } from '@/lib/copy';
 import { REQUEST_COPY } from '@/lib/copy-requests';
 import { useChildStore } from '@/lib/store';
 
+import { FuriganaText } from './FuriganaText';
 import { useSpeechRecognition } from './requests/use-speech-recognition';
 
 export type Narrative = { mode: 'typed' | 'voice_transcript'; text: string };
@@ -26,6 +27,7 @@ export function NarrativeRecorder({
   defaultMode?: 'voice' | 'typed';
 }) {
   const { gradeBand, characterId } = useChildStore();
+  const furigana = gradeBand === 'low';
   const copy = COPY[gradeBand].narrative;
   const voiceCopy = REQUEST_COPY[gradeBand].voice;
   const [text, setText] = useState('');
@@ -48,7 +50,7 @@ export function NarrativeRecorder({
       data-mode={voiceMode ? 'voice' : 'typed'}
     >
       <SpeechBubble tail="bottom" className="text-center">
-        {prompt ?? copy.title}
+        <FuriganaText text={prompt ?? copy.title} enabled={furigana} />
       </SpeechBubble>
       <PetAvatar characterId={characterId ?? 'moko'} expression="caring" size={120} />
       {unsupportedHint && (

@@ -10,8 +10,9 @@ import {
   type DeletionRes,
   type MemoriesRes,
   type MemoryProposalsRes,
+  type ProactiveSlot,
 } from '@ijime/api-types';
-import { Button, Card, RuleCard } from '@ijime/ui';
+import { Button, Card, RuleCard, RULE_CARD_LINES } from '@ijime/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { AppShell } from '@/components/AppShell';
@@ -23,12 +24,22 @@ import { RequestError } from '@/components/RequestError';
 import { MemoryProposal } from '@/components/MemoryProposal';
 import { HomeLocationSettings } from '@/components/HomeLocationSettings';
 import { clearGeofence } from '@/lib/home-location';
+import { FuriganaText } from '@/components/FuriganaText';
+import { ReadAloudButton } from '@/components/requests/ReadAloudButton';
+import { AgentSummary } from '@/components/AgentSummary';
+import { PushSettings } from '@/components/PushSettings';
 
 const GRADE_LABELS = {
   low: 'しょうがっこう 1〜3ねん',
   high: '小学校 4〜6年',
   jhs: '中学校',
 } as const;
+const PROACTIVE_SLOTS: ProactiveSlot[] = ['morning', 'after_school', 'bedtime'];
+const PROACTIVE_SLOT_LABELS: Record<ProactiveSlot, string> = {
+  morning: 'あさ',
+  after_school: 'がっこうの あと',
+  bedtime: 'ねる まえ',
+};
 
 export default function SettingsPage() {
   const s = useChildStore();
@@ -37,9 +48,12 @@ export default function SettingsPage() {
   const [deleted, setDeleted] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [memories, setMemories] = useState<MemoriesRes['items']>([]);
+  const [memoryRevision, setMemoryRevision] = useState(0);
   const [proposals, setProposals] = useState<MemoryProposalsRes['items']>([]);
   const [nextPage, setNextPage] = useState<string | undefined>();
   const [loaded, setLoaded] = useState(false);
+  const [proactiveEnabled, setProactiveEnabled] = useState(true);
+  const [proactiveSlots, setProactiveSlots] = useState<ProactiveSlot[]>(PROACTIVE_SLOTS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(async () => {
@@ -54,6 +68,12 @@ export default function SettingsPage() {
         useChildStore.getState().setDataSource(key, sources.dataSources[key]);
       useChildStore.getState().setGradeBand(preferences.gradeBand);
       useChildStore.getState().setReadAloud(preferences.ttsEnabled ?? false);
+      setProactiveEnabled(preferences.proactiveEnabled ?? true);
+      setProactiveSlots(
+        preferences.proactiveSlots?.filter((slot): slot is ProactiveSlot =>
+          PROACTIVE_SLOTS.includes(slot),
+        ) ?? PROACTIVE_SLOTS,
+      );
       setMemories(result.items);
       setNextPage(result.nextPageToken);
       setProposals(pending.items);
@@ -82,16 +102,28 @@ export default function SettingsPage() {
     }
   };
 
-  const changePreferences = async (gradeBand: GradeBand, ttsEnabled: boolean) => {
+  const changePreferences = async (
+    gradeBand: GradeBand,
+    ttsEnabled: boolean,
+    nextProactiveEnabled = proactiveEnabled,
+    nextProactiveSlots = proactiveSlots,
+  ) => {
     setBusy(true);
     setError(null);
     try {
       const result = await childRequest<ChildPreferencesBody>('/v1/child/preferences', {
         method: 'PUT',
-        body: JSON.stringify({ gradeBand, ttsEnabled }),
+        body: JSON.stringify({
+          gradeBand,
+          ttsEnabled,
+          proactiveEnabled: nextProactiveEnabled,
+          proactiveSlots: nextProactiveSlots,
+        }),
       });
       s.setGradeBand(result.gradeBand);
       s.setReadAloud(result.ttsEnabled ?? false);
+      setProactiveEnabled(result.proactiveEnabled ?? nextProactiveEnabled);
+      setProactiveSlots(result.proactiveSlots ?? nextProactiveSlots);
     } catch (err) {
       setError(err);
     } finally {
@@ -121,6 +153,7 @@ export default function SettingsPage() {
       await childRequest(`/v1/child/memories/${encodeURIComponent(id)}`, { method: 'DELETE' });
       setMemories((items) => items.filter((m) => m.memoryId !== id));
       s.deleteMemory(id);
+      setMemoryRevision((current) => current + 1);
     } catch (err) {
       setError(err);
     } finally {
@@ -162,7 +195,7 @@ export default function SettingsPage() {
                 disabled={!loaded || busy || deleted}
                 onClick={() => void changePreferences(g, s.readAloud)}
               >
-                {GRADE_LABELS[g]}
+                <FuriganaText text={GRADE_LABELS[g]} enabled={s.gradeBand === 'low'} />
               </Button>
             ))}
           </div>
@@ -176,6 +209,39 @@ export default function SettingsPage() {
               onChange={(e) => void changePreferences(s.gradeBand, e.target.checked)}
             />
           </label>
+          <label className="mt-4 flex items-center justify-between">
+            <span>{copy.proactive}</span>
+            <input
+              type="checkbox"
+              className="h-6 w-6 accent-calm"
+              checked={proactiveEnabled}
+              disabled={!loaded || busy || deleted}
+              onChange={(e) => void changePreferences(s.gradeBand, s.readAloud, e.target.checked)}
+            />
+          </label>
+          <fieldset
+            className="mt-3 space-y-2 pl-1"
+            disabled={!loaded || busy || deleted || !proactiveEnabled}
+          >
+            <legend className="text-sm text-ink-soft">あいさつの じかん</legend>
+            {PROACTIVE_SLOTS.map((slot) => (
+              <label key={slot} className="flex items-center justify-between text-sm">
+                <span>{PROACTIVE_SLOT_LABELS[slot]}</span>
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 accent-calm"
+                  checked={proactiveSlots.includes(slot)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...new Set([...proactiveSlots, slot])]
+                      : proactiveSlots.filter((current) => current !== slot);
+                    void changePreferences(s.gradeBand, s.readAloud, proactiveEnabled, next);
+                  }}
+                />
+              </label>
+            ))}
+          </fieldset>
+          <PushSettings childId={s.childId ?? ''} disabled={!loaded || busy || deleted} />
         </Card>
 
         <Card>
@@ -206,7 +272,7 @@ export default function SettingsPage() {
           <h2 className="font-bold">{copy.memories}</h2>
           {!loaded ? (
             <p aria-busy={!error} className="mt-2 text-sm">
-              よみこみ中
+              よみこみちゅう
             </p>
           ) : memories.length === 0 ? (
             <p className="mt-2 text-sm text-ink-soft">{copy.noMemories}</p>
@@ -217,7 +283,9 @@ export default function SettingsPage() {
                   key={m.memoryId}
                   className="flex items-center justify-between gap-3 rounded-2xl bg-cream px-3 py-2"
                 >
-                  <span>{m.text}</span>
+                  <span>
+                    <FuriganaText text={m.text} enabled={s.gradeBand === 'low'} />
+                  </span>
                   <Button
                     size="md"
                     variant="ghost"
@@ -238,10 +306,12 @@ export default function SettingsPage() {
           )}
         </Card>
 
+        <AgentSummary disabled={!loaded || deleted} revision={memoryRevision} />
         {proposals.map((proposal) => (
           <MemoryProposal key={proposal.proposalId} proposal={proposal} />
         ))}
         <RuleCard gradeBand={s.gradeBand} />
+        <ReadAloudButton text={RULE_CARD_LINES[s.gradeBand].join('\n')} />
 
         <Card>
           <h2 className="font-bold">{copy.lock}</h2>

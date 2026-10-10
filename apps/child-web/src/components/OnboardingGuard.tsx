@@ -11,15 +11,24 @@ export function OnboardingGuard({ children }: { children: ReactNode }) {
   const { hydrated, paired, assented, characterId } = useChildStore();
   const pathname = usePathname();
   const router = useRouter();
+  const reconnect =
+    pathname === '/pair' &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('reconnect') === '1';
 
   useEffect(() => {
     if (!hydrated || ALWAYS_OPEN.includes(pathname)) return;
     const target = !paired ? '/pair' : !assented ? '/welcome' : !characterId ? '/choose' : null;
     if (target && pathname !== target) router.replace(target);
-    if (!target && ['/pair', '/welcome', '/choose'].includes(pathname) && pathname !== '/choose') {
+    if (
+      !target &&
+      !reconnect &&
+      ['/pair', '/welcome', '/choose'].includes(pathname) &&
+      pathname !== '/choose'
+    ) {
       router.replace('/');
     }
-  }, [hydrated, paired, assented, characterId, pathname, router]);
+  }, [hydrated, paired, assented, characterId, pathname, reconnect, router]);
 
   if (!hydrated && !ALWAYS_OPEN.includes(pathname)) {
     return (

@@ -1,4 +1,5 @@
 import type {
+  ChatSafetyRes,
   CrisisPayload,
   PetAction,
   SendMessageReq,
@@ -6,14 +7,15 @@ import type {
   StartSessionRes,
 } from '@ijime/api-types';
 
-import { API_BASE_URL, childAuthHeaders } from './api';
+import { ChildApiError, childFetch } from './api';
 
 export type ChatEventHandlers = {
   onMeta: (messageId: string, safeMode: boolean) => void;
   onDelta: (text: string) => void;
   onAction: (action: PetAction) => void;
   onCrisis: (payload: CrisisPayload) => void;
-  onDone: (replyMessageId: string) => void;
+  onReview?: (pending: Extract<ChatSafetyRes, { status: 'pending_review' }>) => void;
+  onDone: (replyMessageId: string, retryable?: boolean) => void;
   onError: (err: Error) => void;
 };
 
@@ -22,6 +24,12 @@ export interface ChatClient {
   send(
     sessionId: string,
     req: SendMessageReq,
+    h: ChatEventHandlers,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  retry?(
+    sessionId: string,
+    messageId: string,
     h: ChatEventHandlers,
     signal?: AbortSignal,
   ): Promise<void>;
@@ -58,37 +66,57 @@ export function dispatch(ev: SseEvent, h: ChatEventHandlers): void {
     case 'crisis':
       h.onCrisis(ev.data);
       break;
+    case 'review':
+      h.onReview?.(ev.data);
+      break;
     case 'done':
-      h.onDone(ev.data.replyMessageId);
+      h.onDone(ev.data.replyMessageId, ev.data.retryable);
       break;
   }
 }
 
 export class ApiChatClient implements ChatClient {
   async startSession(): Promise<StartSessionRes> {
-    const res = await fetch(`${API_BASE_URL}/v1/child/chat/sessions`, {
+    const res = await childFetch('/v1/child/chat/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await childAuthHeaders()) },
       body: '{}',
     });
-    if (!res.ok) throw new Error(`start session ${res.status}`);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      throw new ChildApiError(body?.error?.code ?? 'REQUEST_FAILED', res.status);
+    }
     return (await res.json()) as StartSessionRes;
   }
 
   async send(sessionId: string, req: SendMessageReq, h: ChatEventHandlers, signal?: AbortSignal) {
+    return this.stream(
+      `/v1/child/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+      req,
+      h,
+      signal,
+    );
+  }
+
+  async retry(sessionId: string, messageId: string, h: ChatEventHandlers, signal?: AbortSignal) {
+    return this.stream(
+      `/v1/child/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/reply`,
+      {},
+      h,
+      signal,
+    );
+  }
+
+  private async stream(path: string, body: object, h: ChatEventHandlers, signal?: AbortSignal) {
     const init: RequestInit = {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-        ...(await childAuthHeaders()),
-      },
-      body: JSON.stringify(req),
+      headers: { Accept: 'text/event-stream' },
+      body: JSON.stringify(body),
     };
     if (signal) init.signal = signal;
-    const res = await fetch(`${API_BASE_URL}/v1/child/chat/sessions/${sessionId}/messages`, init);
+    const res = await childFetch(path, init);
     if (!res.ok || !res.body) {
-      h.onError(new Error(`send ${res.status}`));
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+      h.onError(new ChildApiError(body?.error?.code ?? 'REQUEST_FAILED', res.status));
       return;
     }
     const reader = res.body.getReader();
@@ -104,7 +132,8 @@ export class ApiChatClient implements ChatClient {
         buffer = parsed.rest;
         for (const ev of parsed.events) {
           dispatch(ev, h);
-          if (ev.event === 'done' || ev.event === 'crisis') completed = true;
+          if (ev.event === 'done' || ev.event === 'crisis' || ev.event === 'review')
+            completed = true;
         }
       }
       if (!completed && !signal?.aborted) h.onError(new Error('stream interrupted'));

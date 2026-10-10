@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { REQUEST_COPY } from '@/lib/copy-requests';
 import { useChildStore } from '@/lib/store';
 
+import { FuriganaText } from '../FuriganaText';
 import { useAutoReadAloud } from './ReadAloudButton';
 import { IslandSprite, islandItemLabel } from './sprite-fallback';
 
@@ -37,7 +38,7 @@ export function RewardReveal({ itemId, onPlaced }: { itemId: string; onPlaced: (
       data-phase={phase}
     >
       <p role="status" aria-live="polite" className="font-display text-lg font-bold">
-        {status}
+        <FuriganaText text={status} enabled={gradeBand === 'low'} />
       </p>
       <div className="relative flex h-56 w-full max-w-xs items-end justify-center">
         <svg
@@ -63,7 +64,7 @@ export function RewardReveal({ itemId, onPlaced }: { itemId: string; onPlaced: (
         </div>
       </div>
       <p className="text-xl font-bold" data-testid="reward-label">
-        {label}
+        <FuriganaText text={label} enabled={gradeBand === 'low'} />
       </p>
       <Button
         size="xl"

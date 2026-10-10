@@ -1,9 +1,13 @@
 @import 'tailwindcss';
+@source '../../../../packages/ui/src/components/RuleCard.tsx';
+@source '../../../../packages/ui/src/components/primitives.tsx';
 
 @theme {
   --color-paper: #f7f7f5;
   --color-ink: #2b2b2b;
   --color-calm: #3d6f9e;
+  --color-calm-soft: #edf3f8;
+  --color-calm-deep: #315879;
   --color-alert: #b3261e;
   --font-sans: 'BIZ UDPGothic', 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
 }

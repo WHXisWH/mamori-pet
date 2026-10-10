@@ -11,7 +11,7 @@ import {
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   createContext,
   useCallback,
@@ -173,6 +173,7 @@ export function ChildPicker() {
 
 export function GuardianShell({ children }: { children: ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
   const [me, setMe] = useState<MeRes | null>(null);
   const [familyLoading, setFamilyLoading] = useState(true);
   const [familyError, setFamilyError] = useState<Error | null>(null);
@@ -206,6 +207,12 @@ export function GuardianShell({ children }: { children: ReactNode }) {
   }, []);
   const reloadNotices = useCallback(async () => {
     const run = ++noticeRun.current;
+    if (!me?.family.consentComplete) {
+      setNotifications([]);
+      setNoticesError(null);
+      setNoticesLoading(false);
+      return;
+    }
     setNoticesLoading(true);
     try {
       const items: NotificationsRes['items'] = [];
@@ -233,22 +240,23 @@ export function GuardianShell({ children }: { children: ReactNode }) {
     } finally {
       if (run === noticeRun.current) setNoticesLoading(false);
     }
-  }, []);
+  }, [me]);
   useEffect(() => {
     void reloadFamily();
+  }, [path, reloadFamily]);
+  useEffect(() => {
     void reloadNotices();
-  }, [path, reloadFamily, reloadNotices]);
+  }, [path, reloadNotices]);
   useEffect(() => {
     const changed = () => {
       setMe(null);
       selectChild('');
       setNotifications([]);
       void reloadFamily();
-      void reloadNotices();
     };
     window.addEventListener('mamori-guardian-changed', changed);
     return () => window.removeEventListener('mamori-guardian-changed', changed);
-  }, [reloadFamily, reloadNotices]);
+  }, [reloadFamily]);
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState === 'visible') void reloadNotices();
@@ -260,6 +268,28 @@ export function GuardianShell({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', refresh);
     };
   }, [reloadNotices]);
+  const publicPage = path === '/signup' || path === '/offline' || path.startsWith('/invite/');
+  const registrationRequired =
+    familyError instanceof GuardianApiError &&
+    ((familyError.status === 404 && familyError.code === 'NOT_FOUND') ||
+      (familyError.status === 401 && familyError.code === 'UNAUTHENTICATED'));
+  const redirectToSignup = !publicPage && !familyLoading && registrationRequired;
+  useEffect(() => {
+    if (redirectToSignup) router.replace('/signup');
+  }, [redirectToSignup, router]);
+
+  if (!publicPage && ((!me && familyLoading) || redirectToSignup)) {
+    return (
+      <>
+        <Header />
+        <main className="mx-auto max-w-5xl px-4 py-6 text-sm sm:px-6">
+          <p role="status" aria-busy="true" data-testid="guardian-family-loading">
+            登録情報を確認しています
+          </p>
+        </main>
+      </>
+    );
+  }
   const crises = notifications.filter(
     (notice) => notice.kind === 'crisis' && !notice.acknowledgedAt,
   );

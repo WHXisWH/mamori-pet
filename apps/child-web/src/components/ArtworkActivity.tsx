@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { AppShell } from './AppShell';
 import { DrawingCanvas } from './DrawingCanvas';
+import { FuriganaText } from './FuriganaText';
 import { NarrativeRecorder, type Narrative } from './NarrativeRecorder';
 import { RequestError } from './RequestError';
 import { childRequest, saveCrisis } from '@/lib/api';
@@ -107,7 +108,9 @@ export function ArtworkActivity({ type }: { type: 'self_portrait' | 'story' }) {
           <>
             {prompt && (
               <div className="mb-3 text-center" data-testid="story-prompt">
-                <p className="font-display text-lg font-bold leading-relaxed">{prompt.text}</p>
+                <p className="font-display text-lg font-bold leading-relaxed">
+                  <FuriganaText text={prompt.text} enabled={gradeBand === 'low'} />
+                </p>
               </div>
             )}
             <DrawingCanvas
@@ -137,7 +140,9 @@ export function ArtworkActivity({ type }: { type: 'self_portrait' | 'story' }) {
             className="flex flex-col items-center gap-4 py-6 text-center"
             data-png-bytes={png?.size ?? 0}
           >
-            <SpeechBubble tail="bottom">{reply}</SpeechBubble>
+            <SpeechBubble tail="bottom">
+              <FuriganaText text={reply} enabled={gradeBand === 'low'} />
+            </SpeechBubble>
             <PetAvatar characterId={characterId ?? 'moko'} expression="together" size={150} />
             {save && dataSources.artwork_save && artworkId && (
               <div className="flex w-full flex-col items-center gap-3 border-y border-ink/15 py-4">

@@ -13,7 +13,10 @@ import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 
 import { COPY } from '@/lib/copy';
+import { usePetPresence } from '@/lib/pet-presence';
 import { useChildStore } from '@/lib/store';
+import { FuriganaText } from '../FuriganaText';
+import { ReadAloudButton } from '../requests/ReadAloudButton';
 
 import { DecorationsDialog, type Decoration } from './DecorationsDialog';
 import { GoodThingJar } from './GoodThingJar';
@@ -61,7 +64,8 @@ export function GreetingBubble({
             {COPY[gradeBand].home.fromPet}
           </span>
         )}
-        {greeting.text}
+        <FuriganaText text={greeting.text} enabled={gradeBand === 'low'} />
+        <ReadAloudButton text={greeting.text} className="mx-auto mt-1" />
       </SpeechBubble>
     </div>
   );
@@ -88,6 +92,7 @@ export function IslandScene({
   const gradeBand = useChildStore((s) => s.gradeBand);
   const copy = COPY[gradeBand].home;
   const [showDecorations, setShowDecorations] = useState(false);
+  const petState = usePetPresence();
   const stage = island?.stage ?? 1;
   const season = island?.season ?? 'spring';
   const skyLabel = todayMood
@@ -145,6 +150,8 @@ export function IslandScene({
               <PetAvatar
                 characterId={pet.characterId}
                 expression={pet.expression}
+                state={petState}
+                followPointer
                 size="clamp(110px, 30vw, 180px)"
               />
             </Link>

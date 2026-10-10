@@ -28,17 +28,56 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+function sameOriginPath(value) {
+  try {
+    const url = new URL(value, self.location.origin);
+    return url.origin === self.location.origin ? url.pathname + url.search : null;
+  } catch {
+    return null;
+  }
+}
+
+function pushPayload(event) {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+  const n = payload.notification || {};
+  const id = payload.data && payload.data.notificationId;
+  const link = payload.fcmOptions && payload.fcmOptions.link;
+  return {
+    title: typeof n.title === 'string' && n.title ? n.title : 'まもりペット',
+    body:
+      typeof n.body === 'string' && n.body
+        ? n.body
+        : '新しいお知らせがあります。アプリで確認してください。',
+    url:
+      (typeof link === 'string' && sameOriginPath(link)) ||
+      (typeof id === 'string' ? `/notifications/${encodeURIComponent(id)}` : '/'),
+  };
+}
+
 self.addEventListener('push', (event) => {
+  const { title, body, url } = pushPayload(event);
   event.waitUntil(
-    self.registration.showNotification('まもりペット', {
-      body: '新しいお知らせがあります。アプリで確認してください。',
+    self.registration.showNotification(title, {
+      body,
       icon: '/icons/icon.svg',
-      data: { url: '/' },
+      data: { url },
     }),
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow(event.notification.data?.url || '/'));
+  const url = sameOriginPath(event.notification.data?.url || '/') || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => new URL(c.url).origin === self.location.origin);
+      if (open) return open.navigate(url).then((c) => (c || open).focus());
+      return self.clients.openWindow(url);
+    }),
+  );
 });

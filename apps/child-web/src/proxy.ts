@@ -7,11 +7,11 @@ const isDev = process.env.NODE_ENV === 'development';
 export function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/${isDev ? " 'unsafe-eval'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    `connect-src 'self' ${API_BASE_URL} ${VOICE_WS_URL} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com`,
+    `connect-src 'self' ${API_BASE_URL} ${VOICE_WS_URL} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseappcheck.googleapis.com https://recaptchaenterprise.googleapis.com https://www.google.com https://firebaseinstallations.googleapis.com https://fcmregistrations.googleapis.com`,
     "media-src 'self' blob:",
     "worker-src 'self'",
     "manifest-src 'self'",
@@ -36,7 +36,8 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: '/((?!_next/static|_next/image|sw\\.js|manifest\\.webmanifest|icons/).*)',
+      source:
+        '/((?!_next/static|_next/image|sw\\.js|reading-worker\\.js|readings/|manifest\\.webmanifest|icons/).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },

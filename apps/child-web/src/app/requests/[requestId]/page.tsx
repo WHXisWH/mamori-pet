@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { AppShell } from '@/components/AppShell';
 import { DrawingCanvas } from '@/components/DrawingCanvas';
+import { FuriganaText } from '@/components/FuriganaText';
 import { NarrativeRecorder, type Narrative } from '@/components/NarrativeRecorder';
 import { RequestError } from '@/components/RequestError';
 import { PetRequestIntro } from '@/components/requests/PetRequestIntro';
@@ -197,7 +198,9 @@ export default function PetRequestPage() {
               className="flex items-start gap-2 rounded-card bg-white p-3 shadow-soft"
               data-testid="request-prompt"
             >
-              <p className="font-display flex-1 font-bold leading-relaxed">{request.promptText}</p>
+              <p className="font-display flex-1 font-bold leading-relaxed">
+                <FuriganaText text={request.promptText} enabled={gradeBand === 'low'} />
+              </p>
               <ReadAloudButton text={request.promptText} className="shrink-0" />
             </div>
             <DrawingCanvas
@@ -273,9 +276,11 @@ export default function PetRequestPage() {
               data-testid="story-opening"
             >
               <div className="flex-1">
-                <p className="text-sm text-ink-soft">{copy.story.opening}</p>
+                <p className="text-sm text-ink-soft">
+                  <FuriganaText text={copy.story.opening} enabled={gradeBand === 'low'} />
+                </p>
                 <p className="font-display text-lg font-bold leading-relaxed">
-                  {request.promptText}
+                  <FuriganaText text={request.promptText} enabled={gradeBand === 'low'} />
                 </p>
               </div>
               <ReadAloudButton text={request.promptText} className="shrink-0" />
@@ -301,7 +306,7 @@ export default function PetRequestPage() {
           <>
             <div className="flex w-full items-start justify-center gap-2" data-testid="worry-setup">
               <SpeechBubble tail="bottom" className="text-left">
-                {request.promptText}
+                <FuriganaText text={request.promptText} enabled={gradeBand === 'low'} />
               </SpeechBubble>
               <ReadAloudButton text={request.promptText} className="shrink-0" />
             </div>
@@ -324,7 +329,7 @@ export default function PetRequestPage() {
           <div className="flex flex-col items-center gap-4 text-center" data-testid="worry-reply">
             <div className="flex w-full items-start justify-center gap-2">
               <SpeechBubble tail="bottom" className="text-left">
-                {outcome.petReply}
+                <FuriganaText text={outcome.petReply} enabled={gradeBand === 'low'} />
               </SpeechBubble>
               <ReadAloudButton text={outcome.petReply} className="shrink-0" />
             </div>
@@ -345,7 +350,7 @@ export default function PetRequestPage() {
             {request?.type !== 'pet_worry' && outcome.petReply && (
               <div className="flex w-full items-start justify-center gap-2" data-testid="pet-reply">
                 <SpeechBubble tail="none" className="text-left">
-                  {outcome.petReply}
+                  <FuriganaText text={outcome.petReply} enabled={gradeBand === 'low'} />
                 </SpeechBubble>
                 <ReadAloudButton text={outcome.petReply} className="shrink-0" />
               </div>

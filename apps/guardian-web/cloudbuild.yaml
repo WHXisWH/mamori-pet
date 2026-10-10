@@ -1,5 +1,5 @@
 # guardian-web のイメージをビルドする。東京リージョンで実行し、Terraform が管理する Artifact Registry リポジトリ ijime にプッシュする。
-# リポジトリのルートで実行する（_IMAGE_TAG は必須。手動で submit すると SHORT_SHA は空になる。_FIREBASE_API_KEY は terraform output firebase_web_config から取得する）:
+# リポジトリのルートで実行する（_IMAGE_TAG は必須。手動で submit すると SHORT_SHA は空になる。_FIREBASE_API_KEY、_FIREBASE_APP_ID、_FIREBASE_MESSAGING_SENDER_ID は terraform output firebase_web_config の guardian 項から取得する）:
 #   gcloud builds submit . --region=asia-northeast1 --config=apps/guardian-web/cloudbuild.yaml \
 #     --service-account=projects/<PROJECT_ID>/serviceAccounts/sa-cloudbuild@<PROJECT_ID>.iam.gserviceaccount.com \
 #     --gcs-source-staging-dir=gs://<PROJECT_ID>-cloudbuild-source/source \
@@ -18,6 +18,8 @@ substitutions:
   _FIREBASE_AUTH_DOMAIN: ${PROJECT_ID}.firebaseapp.com
   _FIREBASE_API_KEY: ''
   _FIREBASE_VAPID_KEY: ''
+  _FIREBASE_APP_ID: ''
+  _FIREBASE_MESSAGING_SENDER_ID: ''
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -35,6 +37,7 @@ steps:
       - |
         test -n "${_IMAGE_TAG}" || { echo "_IMAGE_TAG が空です。手動で submit するときは --substitutions=_IMAGE_TAG=<git short sha> を付けてください"; exit 1; }
         test -n "${_FIREBASE_API_KEY}" || echo "警告：_FIREBASE_API_KEY が空のため、保護者側でログインできません"
+        test -n "${_FIREBASE_VAPID_KEY}" -a -n "${_FIREBASE_APP_ID}" -a -n "${_FIREBASE_MESSAGING_SENDER_ID}" || echo "警告：FCM の設定が不足しているため、保護者側でブラウザ通知を登録できません（メールは引き続き利用できます）"
 
   - id: docker-build
     name: gcr.io/cloud-builders/docker
@@ -56,6 +59,10 @@ steps:
       - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${_FIREBASE_AUTH_DOMAIN}
       - --build-arg
       - NEXT_PUBLIC_FIREBASE_VAPID_KEY=${_FIREBASE_VAPID_KEY}
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_APP_ID=${_FIREBASE_APP_ID}
+      - --build-arg
+      - NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${_FIREBASE_MESSAGING_SENDER_ID}
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${_IMAGE_TAG}
       - -t

@@ -282,17 +282,17 @@ test('デモ02：帰宅、気分、傾聴、記憶の確認と削除', async ({ 
   await expect(page.getByTestId('chat-input')).toBeEnabled();
   await page.getByTestId('chat-input').fill('今日、学校でみんなに無視されてつらい');
   await page.getByTestId('chat-send').click();
-  await expect(page.getByTestId('offer-tell-adult')).toBeVisible();
   await expect(page.getByTestId('chat-panel')).toHaveAttribute('data-status', 'idle');
   await expect(page.getByTestId('msg-pet').last()).toContainText('つらかったね');
+  await expect(page.getByTestId('offer-tell-adult')).toHaveCount(0);
   await shot(
     page,
     info,
     '08-listening',
     '02 日常の寄り添いと記憶',
-    '傾聴のあとに相談窓口への入口を示す',
+    'まず傾聴し、相談の提案を自動では始めない',
     '「今日、学校でみんなに無視されてつらい」と入力する。',
-    'API と Agent がスクリプト応答を返し、大人に伝えるための入口が表示される。',
+    'API と Agent が支持的なスクリプト応答を返し、「無視」というキーワードだけで相談の提案を自動的に始めない。',
     'ローカルの scripted LLM を使用。ストリーミング経路と画面だけを検証し、実モデルの理解力や心理的介入の有効性は証明しない。',
   );
   await page.getByTestId('chat-input').fill('ねこが すきなこと、おぼえてて');
@@ -522,7 +522,9 @@ test('デモ05：決定論的な危機対応への切り替え、セーフモー
   await page.getByTestId('chat-send').click();
   await expect(page).toHaveURL(/\/safe$/);
   await expect(page.getByTestId('safe-mode')).toBeVisible();
-  await expect(page.getByTestId('safe-call')).toHaveCount(2);
+  await expect(page.getByTestId('safe-call')).toHaveCount(4);
+  await expect(page.locator('[data-testid="safe-call"][href="tel:110"]')).toBeVisible();
+  await expect(page.locator('[data-testid="safe-call"][href="tel:119"]')).toBeVisible();
   await shot(
     page,
     info,

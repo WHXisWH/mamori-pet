@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
 } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { guardianRequest, LOCAL_TEST } from '@/lib/api';
 import { guardianAuth, guardianIdToken } from '@/lib/auth';
@@ -21,6 +21,8 @@ export default function SignupPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
+  const [invite, setInvite] = useState<string | null>(null);
+  useEffect(() => setInvite(new URLSearchParams(window.location.search).get('invite')), []);
   return (
     <main className="mx-auto max-w-lg px-4 py-8">
       <h1 className="text-2xl font-bold">保護者の登録</h1>
@@ -64,6 +66,11 @@ export default function SignupPage() {
                 return;
               }
               headers = { Authorization: `Bearer ${await guardianIdToken(true)}` };
+            }
+            // Invitees join an existing family, so creating one here would block acceptance.
+            if (invite) {
+              router.push(`/invite/${encodeURIComponent(invite)}`);
+              return;
             }
             await guardianRequest<CreateFamilyRes>('/v1/families', {
               method: 'POST',
@@ -155,9 +162,11 @@ export default function SignupPage() {
             ? '登録中…'
             : sent
               ? '確認して続ける'
-              : LOCAL_TEST
-                ? 'ローカル家族を登録'
-                : '登録して続ける'}
+              : invite
+                ? '招待の確認へ進む'
+                : LOCAL_TEST
+                  ? 'ローカル家族を登録'
+                  : '登録して続ける'}
         </button>
       </form>
     </main>

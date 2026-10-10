@@ -168,7 +168,8 @@ for (const grade of ['low', 'high', 'jhs'] as const) {
             const help = rect('[data-testid="help-button"]');
             const note = rect('[data-testid="local-test-mode"]');
             const panel = rect('[data-testid="chat-panel"]');
-            const log = rect('[role="log"]');
+            // The visible message area is the chat-scroll viewport; role="log" is its scrolling content.
+            const log = rect('[data-testid="chat-scroll"]');
             const input = rect('[data-testid="chat-input"]');
             const send = rect('[data-testid="chat-send"]');
             const notice = document.querySelector('[data-testid="local-test-mode"]')!;
@@ -205,14 +206,14 @@ for (const grade of ['low', 'high', 'jhs'] as const) {
     await page.getByTestId('chat-send').click();
     await expect(page.getByTestId('memory-proposal')).toHaveAttribute('data-status', 'pending');
     await expect(page.getByTestId('chat-panel')).toHaveAttribute('data-status', 'idle');
-    await page.getByRole('log').evaluate((log) => log.scrollTo(0, log.scrollHeight));
+    await page.getByTestId('chat-scroll').evaluate((el) => el.scrollTo(0, el.scrollHeight));
     await layout();
     await page.getByTestId('voice-toggle').click();
     await expect(page.getByTestId('voice-error')).toBeVisible();
     await layout();
     await page.setViewportSize({ width: 320, height: 568 });
     await layout();
-    await page.getByRole('log').evaluate((log) => log.scrollTo(0, log.scrollHeight));
+    await page.getByTestId('chat-scroll').evaluate((el) => el.scrollTo(0, el.scrollHeight));
     await layout();
     await page.getByTestId('chat-input').fill('こんにちは');
     await page.getByTestId('chat-send').click();
@@ -274,7 +275,9 @@ test('UI regression: guardian notification hides empty sections and retains popu
   await page.route(url, (route) => route.fulfill({ json: variant }));
   await page.reload();
   await expect(detail).toBeVisible();
-  await expect(detail.locator('h3')).toHaveCount(0);
+  // その後の対応 is the guardian's own follow-up form, not one of the notification's sections.
+  const sectionHeadings = detail.locator('h3').filter({ hasNotText: 'その後の対応' });
+  await expect(sectionHeadings).toHaveCount(0);
   await expect(detail.getByRole('heading', { name: notice.title, exact: true })).toBeVisible();
   await expect(page.getByTestId('notification-ack')).toBeVisible();
   variant = {
@@ -284,7 +287,7 @@ test('UI regression: guardian notification hides empty sections and retains popu
     suggestions: { try: ['合成表示テストの提案'], avoid: ['合成表示テストの注意'] },
   };
   await page.reload();
-  await expect(detail.locator('h3')).toHaveCount(6);
+  await expect(sectionHeadings).toHaveCount(6);
   await expect(detail).toContainText(variant.changes[0]!);
   await expect(detail).toContainText(variant.suggestions.try[0]!);
   await expect(detail).toContainText(variant.suggestions.avoid[0]!);

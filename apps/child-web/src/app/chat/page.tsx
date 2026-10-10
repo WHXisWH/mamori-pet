@@ -5,7 +5,7 @@ import { ChatPanel } from '@/components/ChatPanel';
 
 export default function ChatPage() {
   return (
-    <AppShell back="/" fillViewport>
+    <AppShell back="/" fillViewport reminderInContent>
       <ChatPanel />
     </AppShell>
   );

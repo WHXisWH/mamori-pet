@@ -23,6 +23,7 @@ export default function PairPage() {
         onSubmit={async (code) => {
           try {
             if (process.env.NEXT_PUBLIC_LOCAL_DEMO === '1' && code === '123456') {
+              await signInPairedChild('local-demo:c_dev', 'c_dev');
               useChildStore.getState().reset();
               pair('c_dev');
             } else {

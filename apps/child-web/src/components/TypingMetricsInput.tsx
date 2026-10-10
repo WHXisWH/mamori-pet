@@ -13,6 +13,7 @@ export function TypingMetricsInput({
   placeholder,
   sendLabel,
   onSubmit,
+  onDraftingChange,
 }: {
   maxLength?: number;
   enabled: boolean;
@@ -20,6 +21,8 @@ export function TypingMetricsInput({
   placeholder: string;
   sendLabel: string;
   onSubmit: (text: string, typing?: TypingMetrics) => void;
+  /** Whether the box has text in it; lets the pet listen. Only the flag leaves this component, never the text. */
+  onDraftingChange?: (drafting: boolean) => void;
 }) {
   const [text, setText] = useState('');
   const tracker = useRef(new TypingMetricsTracker());
@@ -30,6 +33,7 @@ export function TypingMetricsInput({
     const metrics = enabled ? tracker.current.snapshot() : undefined;
     onSubmit(t, metrics);
     setText('');
+    onDraftingChange?.(false);
     tracker.current.reset();
   };
 
@@ -63,7 +67,10 @@ export function TypingMetricsInput({
         disabled={disabled}
         placeholder={placeholder}
         enterKeyHint="send"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onDraftingChange?.(e.target.value.length > 0);
+        }}
         onKeyDown={onKeyDown}
         onCompositionStart={() => tracker.current.compositionStart()}
         onCompositionEnd={() => tracker.current.compositionEnd()}

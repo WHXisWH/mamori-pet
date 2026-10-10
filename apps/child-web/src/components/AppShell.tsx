@@ -3,13 +3,16 @@
 import { IconButton } from '@ijime/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { COPY } from '@/lib/copy';
+import { restRhythm } from '@/lib/rest-rhythm';
 import { useChildStore } from '@/lib/store';
 
+import { FuriganaText } from './FuriganaText';
 import { HelpButton } from './HelpButton';
 import { LockGate } from './LockGate';
+import { RestReminder } from './RestReminder';
 
 export function AppShell({
   children,
@@ -19,6 +22,7 @@ export function AppShell({
   hideHelp = false,
   requireLock = true,
   fillViewport = false,
+  reminderInContent = false,
   className = '',
 }: {
   children: ReactNode;
@@ -28,21 +32,37 @@ export function AppShell({
   hideHelp?: boolean;
   requireLock?: boolean;
   fillViewport?: boolean;
+  reminderInContent?: boolean;
   className?: string;
 }) {
   const gradeBand = useChildStore((s) => s.gradeBand);
   const router = useRouter();
   const copy = COPY[gradeBand];
+  const [night, setNight] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset['grade'] = gradeBand;
-    const hour = Number(
-      new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Tokyo' })
-        .format(new Date())
-        .replace(/\D/g, ''),
-    );
-    document.documentElement.dataset['night'] = String(hour >= 23 || hour < 5);
   }, [gradeBand]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const update = () => {
+      clearTimeout(timer);
+      const rhythm = restRhythm();
+      setNight(rhythm.night);
+      document.documentElement.dataset['night'] = String(rhythm.night);
+      timer = setTimeout(update, rhythm.nextChangeMs);
+    };
+    update();
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+      document.documentElement.dataset['night'] = 'false';
+    };
+  }, []);
 
   return (
     <div className={`flex flex-col ${fillViewport ? 'h-dvh' : 'min-h-dvh'} ${className}`}>
@@ -61,7 +81,11 @@ export function AppShell({
             ) : (
               left
             )}
-            {title && <h1 className="font-display text-lg font-bold">{title}</h1>}
+            {title && (
+              <h1 className="font-display text-lg font-bold">
+                <FuriganaText text={title} enabled={gradeBand === 'low'} />
+              </h1>
+            )}
           </div>
           {!hideHelp && <HelpButton label={copy.help} />}
         </div>
@@ -75,6 +99,7 @@ export function AppShell({
         )}
       </header>
       <div className={fillViewport ? 'flex min-h-0 flex-1 flex-col overflow-y-auto' : 'flex-1'}>
+        {night && !hideHelp && !reminderInContent && <RestReminder />}
         {requireLock ? <LockGate>{children}</LockGate> : children}
       </div>
     </div>

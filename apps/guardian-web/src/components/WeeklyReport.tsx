@@ -1,6 +1,6 @@
 'use client';
 
-import type { MoodWeather, WeeklyReportRes } from '@ijime/api-types';
+import type { MoodWeather, WeeklyReportRes, WeeklyReportsRes } from '@ijime/api-types';
 import { Cloud, CloudLightning, CloudRain, RefreshCw, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -23,6 +23,7 @@ const weather = [
 export function WeeklyReport({ childId }: { childId: string }) {
   const [week, setWeek] = useState('');
   const [report, setReport] = useState<WeeklyReportRes | null>(null);
+  const [trend, setTrend] = useState<WeeklyReportsRes['items']>([]);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -32,6 +33,7 @@ export function WeeklyReport({ childId }: { childId: string }) {
     setLoading(true);
     setError(null);
     setReport(null);
+    setTrend([]);
     setMissing(false);
     const query = week ? `?${new URLSearchParams({ week })}` : '';
     void guardianRequest<WeeklyReportRes>(
@@ -49,6 +51,14 @@ export function WeeklyReport({ childId }: { childId: string }) {
       .finally(() => {
         if (!abort.signal.aborted) setLoading(false);
       });
+    void guardianRequest<WeeklyReportsRes>(
+      `/v1/children/${encodeURIComponent(childId)}/weekly-reports?${new URLSearchParams({ weeks: '6' })}`,
+      { signal: abort.signal },
+    )
+      .then((res) => {
+        if (!abort.signal.aborted) setTrend(res.items);
+      })
+      .catch(() => undefined);
     return () => abort.abort();
   }, [childId, week, refresh]);
   return (
@@ -155,6 +165,24 @@ export function WeeklyReport({ childId }: { childId: string }) {
               >
                 {report.summaryText}
               </p>
+            )}
+            {trend.length > 1 && (
+              <div className="mt-7 border-t border-ink/10 pt-5" data-testid="weekly-trend">
+                <h3 className="mb-3 text-sm font-bold">最近の変化</h3>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {trend.map((item) => (
+                    <div
+                      key={item.weekId}
+                      className="rounded-md border border-ink/10 bg-white/55 p-3 text-xs"
+                    >
+                      <p className="font-bold">{item.weekId}</p>
+                      <p className="mt-1 text-ink/70">
+                        利用 {item.vitality.activeDays} 日 · 深夜 {item.vitality.lateNightDays} 日
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )

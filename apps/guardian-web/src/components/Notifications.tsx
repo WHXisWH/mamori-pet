@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { guardianRequest } from '@/lib/api';
 import { useGuardian } from './GuardianShell';
+import { NotificationFeedback } from './NotificationFeedback';
 
 export { GuardianHeader } from './GuardianShell';
 
@@ -78,7 +79,7 @@ export function NotificationList({ childId = '' }: { childId?: string }) {
               {shown.map((item) => (
                 <li key={item.id}>
                   <Link
-                    href={`/notifications/${encodeURIComponent(item.id)}`}
+                    href={`${item.kind === 'crisis' ? '/crisis' : '/notifications'}/${encodeURIComponent(item.id)}`}
                     className="block py-5"
                     data-testid="notification-link"
                   >
@@ -196,20 +197,21 @@ export function NotificationView({ id }: { id: string }) {
         </section>
       )}
       {notice.resources.length > 0 && (
-        <section>
+        <section id="notification-resources">
           <h3 className="mb-2 font-bold">相談先</h3>
           <ul className="space-y-3">
             {notice.resources.map((r) => (
               <li key={r.id}>
                 <p>{r.name}</p>
-                {r.phone && (
+                {r.phone?.split('/').map((phone) => (
                   <a
-                    className="text-calm underline"
-                    href={`tel:${r.phone.replace(/[^+0-9]/g, '')}`}
+                    key={phone}
+                    className="mr-3 inline-block py-2 text-calm underline"
+                    href={`tel:${phone.replace(/[^+0-9]/g, '')}`}
                   >
-                    {r.phone}
+                    {phone.trim()}
                   </a>
-                )}
+                ))}
                 {r.url && (
                   <a
                     className="ml-3 text-calm underline"
@@ -241,6 +243,7 @@ export function NotificationView({ id }: { id: string }) {
           内容を確認しました
         </button>
       )}
+      <NotificationFeedback key={notice.id} notice={notice} />
     </article>
   );
 }

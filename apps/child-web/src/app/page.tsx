@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AppShell, SettingsLink } from '@/components/AppShell';
 import { FollowupPrompt } from '@/components/FollowupPrompt';
+import { FuriganaText } from '@/components/FuriganaText';
 import { HomeCheckinPrompt } from '@/components/HomeCheckinPrompt';
 import { GoodThingNote } from '@/components/island/GoodThingJar';
 import { IslandScene } from '@/components/island/IslandScene';
@@ -186,12 +187,23 @@ export default function HomePage() {
         onWater={() => void ritual('watered')}
         onGoodThing={() => void ritual('good_thing')}
       >
+        {home?.careHotline && (
+          <a
+            href={`tel:${home.careHotline.phone ?? ''}`}
+            data-testid="care-hotline"
+            className="absolute top-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-sm font-bold text-ink shadow-soft backdrop-blur focus-visible:outline-4 focus-visible:outline-calm-deep"
+          >
+            <span aria-hidden="true">📞</span>
+            <FuriganaText text={copy.home.careHotline} enabled={gradeBand === 'low'} />
+            <span className="text-ink-soft">{home.careHotline.phone}</span>
+          </a>
+        )}
         {petName && (
           <p
             className="absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1 text-sm font-bold text-ink-soft"
             data-testid="pet-name"
           >
-            {petName}
+            <FuriganaText text={petName} enabled={gradeBand === 'low'} />
           </p>
         )}
       </IslandScene>
