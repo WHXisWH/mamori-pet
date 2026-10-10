@@ -28,11 +28,11 @@ Agent の内部ワークフロー、プロンプト、出力スキーマは「�
 共通規約：
 
 - アドレス：REST は https://api.{domain}/v1、音声は wss://voice.{domain}/v1/voice です。前段に外部 HTTPS ロードバランサーと Cloud Armor（レート制限、WAF）を置きます。
-- リクエストヘッダー：Authorization に ID トークン、X-Firebase-AppCheck に App Check トークン（reCAPTCHA Enterprise）を付けます。X-Request-Id は任意で、省略時はサーバーが生成します。
+- リクエストヘッダー：Authorization に ID トークン、X-Firebase-AppCheck に App Check トークン（reCAPTCHA Enterprise）を付けます。X-Request-Id は任意で、省略時はサーバーが生成します。本番の api は認証ミドルウェアで Firebase App Check の `projects/*:verifyAppCheckToken` を呼んでトークンを検証します。ローカルの非本番環境では、既存の `X-Dev-Child-Id` / `X-Dev-Guardian-Id` による連携確認用ヘッダーを引き続き使えます。
 - トレース：W3C traceparent を引き継ぎ、すべてのサービスが span を Cloud Trace に送ります。
 - 冪等性：レコードを新規作成する POST エンドポイントは Idempotency-Key ヘッダー（UUID）を受け付け、24時間以内の重複送信には最初の結果を返します。
 - ページング：カーソル方式です。パラメーターは pageSize（既定20、最大100）と pageToken です。
-- レート制限：子ども単位と保護者単位でそれぞれ制限します。具体的な数値は未定です。
+- レート制限：子ども単位と保護者単位でそれぞれ制限します。具体的な数値は未定です（`packages/config` の rateLimit。推奨値は1分あたり子ども 60、保護者 120）。認証を通過してから数え、超過時は 429 RATE\_LIMITED を返し、子ども側には固定の文言を表示して、相談窓口への入口は通常どおり使えます。相談窓口と「おとなに つたえたい」はレート制限の対象外です。危機検知を通る子どもの入力（会話のメッセージ、作品と島についての語り、相談の要約、ペットのお願いの結末）は、より厳しいモデルの枠で制御し、枠を超えたときもキーワードに該当すれば危機として扱います。カウントはインスタンスごとのプロセス内で行うため、実際の上限は数値にインスタンス数を掛けたものになり、目的はスクリプトによる連打を防ぐことです。匿名のペアリングには Firestore のシャードカウンターで全体の上限をかけます。音声には別に1日あたりの分数の上限と予算によるサーキットブレーカーがあり、「リアルタイム音声プロトコル」を参照してください。
 
 エラーは次の形式に統一します。エラーコードは「危機対応経路とエラーコード」の節を参照してください。
 
@@ -126,6 +126,7 @@ sequenceDiagram
 | GET | /v1/child/help-resources | 相談先。ログイン不要で、フロントエンドがオフライン用にキャッシュする |
 | GET | /v1/child/home | ホームのデータ：ペット、島の概要、今日の習慣、表示待ちのあいさつ、未完了のペットのお願い、回答待ちの相談 |
 | GET | /v1/characters | 選べるキャラクターの一覧 |
+| GET | /v1/child/characters | 子ども自身の島の進み具合とシークレットのたまごのロック状態を含むキャラクターの一覧 |
 | POST | /v1/child/pets | パートナーを選ぶ、または変更する。記憶を引き継ぐかどうかも指定する |
 | POST | /v1/child/chat/sessions | テキストのセッションを開始 |
 | GET | /v1/child/chat/sessions | 自分のセッションを一覧表示 |
@@ -148,8 +149,13 @@ sequenceDiagram
 | POST | /v1/child/island-scenes | PUT /v1/child/island に統合済み。1バージョンだけ残してから削除する |
 | GET | /v1/child/memories | ペットが覚えていることを閲覧 |
 | DELETE | /v1/child/memories/{memoryId} | 記憶を1件削除 |
+| GET | /v1/child/agent-summary | 現在のペットの有効な要約を閲覧。子ども本人だけが読める |
+| POST | /v1/child/agent-summary/decision | バージョンを指定して要約を確認または忘却 |
+| POST | /v1/child/devices | 子ども自身の FCM 端末を登録 |
+| DELETE | /v1/child/devices/{deviceId} | 自分のプッシュ通知の端末を取り消す。重複した取り消しは冪等 |
 | GET、PUT | /v1/child/data-sources | データソースのスイッチを閲覧または変更 |
 | POST | /v1/child/tell-adult | 子どもが自分から「おとなに つたえたい」を押す |
+| POST | /v1/child/crisis-acknowledgements | 子どもがセーフモードの画面で「今は安全」と確認する。家庭内での危害のイベントにだけ効き、`{ acknowledged }` を返す |
 | POST | /v1/child/consultations/{consultationId}/choice | ペットからの相談に回答 |
 | POST | /v1/child/data-deletion-requests | 自分の全データの削除をリクエスト |
 
@@ -219,6 +225,7 @@ POST /v1/child/consultations/cs_12/choice
 | GET | /v1/notifications | 通知の一覧 |
 | GET | /v1/notifications/{notificationId} | 通知の詳細。保護者向けに整えた内容 |
 | POST | /v1/notifications/{notificationId}/ack | 受け取りを確認 |
+| PUT | /v1/notifications/{notificationId}/feedback | 保護者が自分の行動を記録する。問題が解決したことは意味しない |
 | GET、POST | /v1/context-events | 手動で登録したコンテキスト情報を一覧表示または追加 |
 | DELETE | /v1/context-events/{eventId} | コンテキスト情報を1件削除 |
 | POST | /v1/calendar/connect | Google カレンダーの認可を開始し、認可 URL を返す |
@@ -241,20 +248,19 @@ POST /v1/child/consultations/cs_12/choice
   "id": "n_77",
   "childId": "c_41a7",
   "kind": "care_hint",
-  "title": "最近、〇〇さんに少し元気のない日が続いています",
-  "changes": [
-    "寝る前のおしゃべりで、疲れや寂しさを表す言葉がいつもより多い",
-    "朝の気分が低めの日が続いている"
-  ],
-  "meaning": "これだけで何かが起きていると決まるわけではありません。",
+  "title": "〇〇さんからの相談",
+  "changes": [],
+  "meaning": "お子さんが共有に同意した内容をお届けします。出来事を第三者が確認したものではありません。まずは落ち着いてお話を聞いてみてください。",
   "suggestions": { "try": ["「最近どう？なんでも聞くよ」"], "avoid": ["問い詰める", "すぐに学校へ電話する"] },
   "childSummary": null,
   "resources": [{ "name": "24時間子供SOSダイヤル", "phone": "0120-0-78310" }],
-  "reason": { "domains": ["m", "a"], "days": 7 },
+  "reason": { "domains": ["a"], "days": 0 },
   "createdAt": "2026-09-28T09:00:00Z",
   "acknowledgedAt": null
 }
 ```
+
+通知の `reason.days` は、根拠のある集約された傾向の日数だけを表します。一度きりの明確な表現（リスクの根拠が `explicit=true`）や評価がない場合は 0 で、`changes=[]` になります。リスク記録の元の `explanation.days=1` は変えず、観察日数としては送りません。事実の欄はコードが生成します。確認済みの要約は原文のまま保ち、提案はモデルが書いて検証し、失敗したときは同じ出どころのテンプレートにフォールバックします。
 
 週ごとの元気度のレスポンス：
 
@@ -293,7 +299,7 @@ type Page<T> = { items: T[]; nextPageToken?: string };
 type HelpResource = { id: string; name: string; phone?: string; url?: string; hours?: string; audience: string };
 type CrisisPayload = { crisisId: string; message: string; resources: HelpResource[] };
 type PetAction =
-  | { type: 'offer_tell_adult'; consultationId: string }
+  | { type: 'offer_tell_adult'; consultationId: string; openingLine?: string; source?: 'restored_followup' }
   | { type: 'show_help_resources' }
   | { type: 'suggest_game'; game: GameType; requestId: string }
   | { type: 'quick_replies'; options: string[] }
@@ -359,12 +365,21 @@ type RitualRes = { rituals: ChildHomeRes['rituals']; goodThingCount: number };
 
 // GET /v1/characters
 type CharactersRes = {
-  items: { characterId: CharacterId; displayName: string; archetype: string; palette: { main: string; sub: string }; voicePreviewUrl: string }[];
+  items: { characterId: CharacterId; displayName: string; archetype: string; palette: { main: string; sub: string }; voicePreviewUrl: string; locked?: boolean; unlockProgress?: { current: number; required: number } }[];
 };
 
 // POST /v1/child/pets  エラー：INVALID_ARGUMENT
 type ChoosePetReq = { characterId: CharacterId; petName?: string; carryMemoryFrom?: string };  // petName は最大10文字
 type ChoosePetRes = { petId: string; characterId: CharacterId; hiddenVariantId?: string };
+
+// GET、PUT /v1/child/preferences
+type ChildPreferencesBody = {
+  gradeBand: GradeBand;
+  nickname?: string;
+  ttsEnabled?: boolean;
+  proactiveEnabled?: boolean;
+  proactiveSlots?: ('morning' | 'after_school' | 'bedtime')[];
+};
 
 // POST /v1/child/chat/sessions
 type StartSessionRes = { sessionId: string; openingMessage: string };
@@ -384,8 +399,19 @@ type SseEvent =
   | { event: 'meta'; data: { messageId: string; safeMode: boolean } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'action'; data: PetAction }
+  | { event: 'review'; data: Extract<ChatSafetyRes, { status: 'pending_review' }> }
   | { event: 'crisis'; data: { crisisId: string; message: string; resources: HelpResource[] } }
-  | { event: 'done'; data: { replyMessageId: string } };
+  | { event: 'done'; data: { replyMessageId: string; retryable?: boolean } };
+
+// GET /v1/child/chat/sessions/{sessionId}/safety (authenticated, no-store)
+type ChatSafetyRes =
+  | { status: 'clear'; resumeMessageId?: string }
+  | { status: 'pending_review'; messageId: string; message: string; resources: HelpResource[] }
+  | { status: 'crisis'; crisis: { crisisId: string; message: string; resources: HelpResource[] } };
+
+// POST /v1/child/chat/sessions/{sessionId}/messages/{messageId}/reply -> SseEvent
+// ボディなし。元の入力を再利用する。再審査が済んでいない、入力が期限切れ、危機、処理中、完了済みのときは 409。アクセス権がないときは 404。
+// retryable は、ツールや action の副作用がないと明確な失敗のときだけ true。不明な中断はやり直しを許さない。
 
 // GET /v1/child/chat/sessions/{sessionId}/messages
 type MessagesRes = Page<{ messageId: string; role: 'child' | 'pet'; text: string; createdAt: ISODateTime }>;
@@ -425,6 +451,18 @@ type IslandRes = { sceneId: string; petPrompt: string; crisis?: CrisisPayload };
 type MemoriesRes = Page<{ memoryId: string; text: string; category: string; createdAt: ISODateTime }>;
 
 // DELETE /v1/child/memories/{memoryId} → 204
+
+// GET /v1/child/agent-summary。レスポンスは Cache-Control: no-store
+type AgentSummaryRes = {
+  summary: { version: string; text: string; approved: boolean; expiresAt: ISODateTime } | null;
+};
+// POST /v1/child/agent-summary/decision → 204。期限切れまたはバージョンの変化 → 409
+type AgentSummaryDecisionReq = { version: string; decision: 'accept' | 'reject' };
+// version は暗号文の SHA-256。reject は同時に古いモデルの履歴を無効にする。保護者には要約を提供しない。
+
+// POST /v1/child/devices → 201。DeviceReq / DeviceRes を使う
+// DELETE /v1/child/devices/{deviceId} → 204
+// 身元は子どものトークンから取る。他の人の代わりに登録や削除はできない。停止中／削除中でも自分の端末の取り消しはできる。
 
 // GET /v1/child/data-sources と PUT /v1/child/data-sources は同じ構造を使う
 type DataSourcesBody = { dataSources: Record<DataSource, boolean> };
@@ -516,6 +554,30 @@ type NotificationDetail = NotificationSummary & {
 // POST /v1/notifications/{notificationId}/ack
 type AckRes = { acknowledgedAt: ISODateTime };
 
+// PUT /v1/notifications/{notificationId}/feedback
+type NotificationFeedbackReq = { action: 'talked' | 'planned' | 'need_help' };
+type NotificationFeedbackRes = { feedback: NotificationFeedbackReq & { updatedAt: ISODateTime } };
+// GET の通知詳細に任意の feedback を追加する。子どものフォローアップの回答、原文、リスクレベルを含めてはならない。
+
+// GET /v1/child/followups は期日の来た items（followupId、kind、dueAt、consultationId?/crisisId?）を返す。
+// POST /v1/child/followups/{followupId}/answer
+type FollowupAnswerReq = { answer: 'talked' | 'need_help' | 'not_now' | 'supported' };
+type FollowupAnswerRes = {
+  status: 'answered';
+  continuation?: 'scheduled' | 'paused' | 'supported' | 'help_requested';
+  dueAt?: ISODateTime;
+  consultationId?: string;
+};
+// talked/not_now は回数の上限内なら次の回を予定し、上限を超えたら paused。supported はその件についての通常の声かけを止める。
+// need_help は冪等に相談を新しく作り、子どもがもう一度選ぶ必要がある。自動では伝えない。いずれの操作も危機を自動で閉じない。
+// POST /v1/child/tell-adult による自発的な相談は、期日前でも終了していない L2 の not_now を復帰させ、元の consultationId を再利用して
+// 古いフォローアップの期日を取り下げる。通常の GET/home では早めに復帰させず、supported/paused 済みの件は復活させない。
+// SSE の offer_tell_adult action には openingLine を添えられる。その学年帯の既存の coaching テンプレートの1行目から取る。
+// クライアントはこれを独立した話し始めの例として示し、モデルの応答には混ぜない。古いクライアントはこの任意フィールドを無視してよい。
+// source=restored_followup は、子どもがすでに「まだ助けが必要」を押した未選択の相談を復元したことだけを表し、このターンのモデルのツール呼び出しではない。
+// source=child_followup / followUpReason=need_help の有効で未選択のレコードだけを読み、作成、再開、通知はしない。
+// self/proxy/not_now、一時停止、終了、リスクエンジンが開始したもの、危機／家庭内での危害、自発ターンはいずれもこの復元を起こさない。同じ ID の action は重複排除する。
+
 // GET /v1/context-events?childId=  ·  POST /v1/context-events  ·  DELETE /v1/context-events/{eventId}
 type ContextEvent = { eventId: string; childIds: string[]; category: ContextCategory; startDate: LocalDate; endDate: LocalDate; source: 'calendar' | 'manual' };
 type CreateContextEventReq = { childIds: string[]; category: ContextCategory; startDate: LocalDate; endDate: LocalDate };
@@ -533,10 +595,14 @@ type CalendarSelectReq = { calendarIds: string[] };
 // DELETE /v1/calendar/connection → 204（同時にトークンを失効させる）
 
 // POST /v1/guardians/invitations  エラー：ALREADY_EXISTS（第二保護者が登録済み）
+// 招待できるのは主保護者だけで、家庭の同意が完了していることが条件。同時に有効な招待の数には上限がある（RATE_LIMITED）。
+// invitationId は一度きりのトークンで、主保護者が保護者側の承諾リンクを相手に渡す（システムは招待メールを代わりに送らない）
 type InviteReq = { email: string };
 type InviteRes = { invitationId: string; expiresAt: ISODateTime };
 
 // POST /v1/guardians/invitations/{invitationId}/accept  エラー：NOT_FOUND、INVITATION_EXPIRED
+// ログインしたメールアドレスは確認済みで、招待のメールアドレスと一致していなければならない（そうでなければ PERMISSION_DENIED）。すでにいずれかの家庭に属していれば ALREADY_EXISTS。
+// 同じ人の再試行は成功を返す。承諾後は secondary になり、カスタムクレームは guardianRole=secondary
 type AcceptInviteRes = { familyId: string };
 
 // POST /v1/devices
@@ -609,7 +675,7 @@ type AssessReq = { childId: string; domains: string[]; explicit: boolean };
 | サーバー → クライアント | interrupted | なし | 子どもがペットの発話に割り込んだ。フロントエンドはすぐに再生を止める |
 | サーバー → クライアント | action | type とパラメーター | テキストモードと同じ。例：offer\_tell\_adult、show\_help\_resources |
 | サーバー → クライアント | crisis | resources、message | セーフモードに入る。次の節を参照 |
-| サーバー → クライアント | end | reason：stop / timeout / crisis / error | セッション終了 |
+| サーバー → クライアント | end | reason：stop / timeout / crisis / error / limit / unavailable | セッション終了。limit は当日の音声の分数を使い切ったとき、unavailable は音声が全体で停止されているとき |
 
 そのほかの規約：
 
@@ -617,6 +683,8 @@ type AssessReq = { childId: string; domains: string[]; explicit: boolean };
 - 子どもの文字起こしとペットの文字起こしはどちらも messages に保存し、テキストモードと同じシグナルのパイプラインを共有します。
 - セッションの長さは Live API の上限に従い、上限が近づいたらセッション再開機能で自動的につなぎ直します。
 - ネットワークが切れた場合、フロントエンドは5秒以内に新しいチケットで再接続します。再接続に失敗したら、テキストに切り替えるよう子どもに案内します。
+- 音声の分数の上限：子どもごとに1日（東京の日付）の音声の利用時間に上限があります（`packages/config` の voice.dailyMinutesPerChild。未定）。api はチケットを発行する前に、voice-relay はセッションを作る前に、当日の残り秒数を確認します。セッションが残り時間に達したら voice-relay が end（limit）で終了し、終了時に今回の時間を `chatUsage/{date}_voice` に加算します。子ども側には固定の文言を表示し、テキストの会話と相談窓口への入口は通常どおり使えます。
+- 予算のサーキットブレーカー：月の予算が `pilot.voiceBreakerThreshold`（100%）に達すると、予算アラートが Pub/Sub 経由で notifier に届き、notifier が `opsFlags/voice.disabled = true` を書き込みます。以降、api は音声チケットを発行せず（503 MODEL\_UNAVAILABLE）、voice-relay は新しいセッションを拒否します（end unavailable）。進行中のセッションは中断しません。次の請求期間の最初の予算通知が届いたときに自動で復帰し、運用担当者がこのドキュメントを手動で変えることもできます。
 
 ## 内部イベントと Agent ツール
 
@@ -633,7 +701,9 @@ type AssessReq = { childId: string; domains: string[]; explicit: boolean };
 | consultation.resolved | api | notifier | childId、consultationId、choice |
 | data.deletion\_requested | api | 削除ジョブ | familyId、childId、scope |
 
-Cloud Tasks のキューは4つあります。notify-send は通知を1件ずつ送信し、リトライします。crisis-escalation には遅延タスクを入れ、時刻になったら危機通知が確認済みかどうかを調べ、未確認なら再送して第二保護者にも通知します。consultation-timeout には risk-engine が L3 の相談を開始するときにタスクを入れ、時刻になっても子どもが回答していなければ notifier が内容を含まないお知らせを送ります。proactive-turns には Cloud Scheduler の起動時に api が子どもごとにタスクを入れ、pet-agent を呼び出して自発的なあいさつを生成します（Agent ドキュメントの「自発ターン（ペットから話しかける）」を参照）。
+Cloud Tasks のキューは6つあります。weekly-report には Cloud Scheduler が週次レポートを起動したときに notifier がシャードごとに1つのタスクを入れ、notifier に戻して子ども ID のハッシュで自分のシャードだけを処理します。crisis-recheck には、モデルが使えずメッセージを保留したときに api と voice-relay がタスクを入れ、signal-worker が再審査します（Agent ドキュメントの「モデルが利用できないとき」の処理を参照）。notify-send は通知を1件ずつ送信し、リトライします。crisis-escalation には遅延タスクを入れ、時刻になったら危機通知が確認済みかどうかを調べ、未確認なら再送して第二保護者にも通知します。consultation-timeout には risk-engine が L3 の相談を開始するときにタスクを入れ、時刻になっても子どもが回答していなければ notifier が内容を含まないお知らせを送ります。proactive-turns には Cloud Scheduler の起動時に api が子どもごとにタスクを入れ、pet-agent を呼び出して自発的なあいさつを生成します（Agent ドキュメントの「自発ターン（ペットから話しかける）」を参照）。バックグラウンドの2つのキュー（crisis-recheck、proactive-turns）の配信レートの合計は、Flash のクォータの半分を超えないようにします。
+
+予算とアラート（infra/terraform/monitoring.tf）：月の予算の 50%、90%、100% でメールを送り、Pub/Sub トピック budget-alerts に発行します。100% に達したら voice-relay は新しい音声セッションを受け付けません。アラートが読むのは構造化ログのイベント名と数値フィールド（crisis.check の method、latencyMs など）とプラットフォームの指標だけで、5xx と 429 の割合、最初の文字と危機検知の p95、モデルが使えないことによる保留の割合、再判定のタイムアウト、デッドレターの滞留、再審査の滞留、危機通知の期限超過の到達と未確認、危機通知の到達失敗を含みます。
 
 ペット Agent のツールは、テキストモード（ADK `runAsync`）と音声モード（ADK `runLive`）で同じ ADK `FunctionTool` の組を使い、宣言は完全に一致します。
 
@@ -672,12 +742,12 @@ Cloud Tasks のキューは4つあります。notify-send は通知を1件ずつ
 
 危機対応経路では、見逃しよりも誤検知を許容します。キーワードに該当した入力はすべて危機として扱います。モデルによるスクリーニングや再確認が利用できないときは、その入力を保留して後から審査し、通過も危機判定もさせません（Agent ドキュメントの「危機検知器」の節を参照）。セーフモードでペットが話す言葉は定型テンプレートから取り、モデルには生成させません。
 
-1. 検知：api または voice-relay の危機検知に該当します。検知はキーワード、意味的スクリーニング、Pro による再確認の3層で、詳細は Agent アーキテクチャとワークフローのドキュメントを参照してください。再確認がタイムアウトした場合は該当として扱います。タイムアウトのしきい値の推奨値は1.5秒です。
+1. 検知：api または voice-relay の危機検知に該当します。検知はキーワード、意味的スクリーニング、Pro による再確認の3層で、詳細は Agent アーキテクチャとワークフローのドキュメントを参照してください。キーワードに該当したあとで再確認がタイムアウトまたはエラーになった場合は、カテゴリ other の該当として扱います。キーワードに該当せずモデルが使えない場合は、会話のメッセージを保留して crisis-recheck の再審査に回し（SSE では sleepy の表情、相談窓口への入口、固定の文言を返します）、作品についての語りと要約には 503 MODEL\_UNAVAILABLE を返します。再審査で該当した場合は signal-worker が下の3、4のステップを実行し、イベントには delayed=true を付けます。
 2. 子どもへの即時応答：テキストモードでは SSE で crisis イベントを送ります。音声モードでは crisis メッセージを送り、ペットの発話を止めます。フロントエンドはセーフモードの画面に切り替え、相談窓口を表示します。
 3. crisisEvents に書き込み、crisis.detected を発行します。
-4. notifier が category を確認します。family\_harm でなければ、ただちに webpush、email、sms ですべての保護者に通知します。family\_harm の場合は保護者に通知せず、子ども側に189と110だけを残します（この例外は弁護士の確認が必要です）。ペット Agent が危機用のツールで報告した危機も同じ経路をたどり、既定で家庭内での危害として扱うことはしません。
-5. crisis-escalation の遅延タスクを作成します。保護者が所定の時間内に確認しなければ、再送して第二保護者にも通知します。所定の時間は未定です。
-6. 保護者が確認すると、イベントの状態を guardian\_acknowledged に変更します。翌日、ペットが子どもにやさしくあいさつします。イベントをクローズする条件は未定です。
+4. notifier が category を確認します。family\_harm でなければ、ただちに webpush、email、sms で主保護者に通知します（主保護者の印がない古いデータでは、すべての保護者に通知します）。family\_harm の場合は保護者に通知せず、子ども側に189と110だけを残します（この例外は弁護士の確認が必要です）。この種のイベントは子どもの代わりに確認できる人がいないため、子どもがセーフモードの画面で「安全」と答えたら確認とみなします（POST /v1/child/crisis-acknowledgements。状態を child\_acknowledged に変え、timeline に child\_acknowledged を1件記録します）。子どもはすぐにペットのもとへ戻り、ホームには24時間 189 を固定表示し、ペットは気づかう表情を保ちます。何も動作がなければ、検知から7日（`crisis.familyHarmAutoCloseDays`）でクローズとみなします。ペット Agent が危機用のツールで報告した危機も同じ経路をたどり、既定で家庭内での危害として扱うことはしません。
+5. crisis-escalation の遅延タスクを作成します。保護者が所定の時間内に確認しなければ、再送して第二保護者を加えます（毎回すべての保護者を読み直します）。いずれかの保護者が確認したら再送を止めます。所定の時間は未定です。MVP のデモでは email チャネルは Gmail API で固定テンプレート（タイトル、本文、保護者側へのリンク、結び）を送り、子どもの呼び名や内容は一切含めません。
+6. 保護者が確認すると、イベントの状態を guardian\_acknowledged に変更します。翌日、ペットが子どもにやさしくあいさつします。保護者または子どもの確認から24時間が経つとイベントはクローズとみなします（`crisis.autoCloseAfterAckHours`）。各サービスは読み取り時に `@ijime/config` の `isCrisisActive` で判定し、リスクエンジンの日次ジョブが状態を closed に書き換えて timeline に closed を1件記録します。確認時刻を読めないときは進行中として扱います。子ども向けのロック（チャットのセーフモード、おとなに伝える、ペットのお願い、音声）には `isCrisisLockingChild` を使い、子ども自身が確認したイベントはただちに解除します。保護者向けの判定（代わりに伝える、週次レポート、通知）は引き続き `isCrisisActive` でさらに24時間守ります。
 
 テキストモードの crisis イベント：
 
@@ -709,7 +779,7 @@ data: {"crisisId":"cr_5","message":"話してくれて ありがとう。あな�
 
 - [ ] 保護者の同意の検証方法と、POST /v1/consents に必要なフィールド
 - [ ] 各エンドポイントのレート制限の数値
-- [ ] 危機通知が未確認のときの再送間隔と、危機イベントをクローズする条件
+- [ ] 危機通知が未確認のときの再送間隔（クローズする条件は決定済み：保護者の確認から24時間。2026-10-10 決定）
 - [ ] 危機の再確認のタイムアウトしきい値。推奨値は1.5秒で、実測のうえ確定する
 - [ ] SMS とメールのプロバイダー、および notifier との接続方法
 - [ ] suggest\_game の週ごとの回数上限

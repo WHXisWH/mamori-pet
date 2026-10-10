@@ -7,7 +7,7 @@
 設計原則：
 
 1. クライアントは Firestore に直接接続しません。読み書きはすべてバックエンド API を経由し、Firestore のセキュリティルールは既定ですべて拒否します。
-2. 機微なテキストはフィールド単位で暗号化します。会話の原文、ペットの記憶、作品についての語りは、Cloud KMS のエンベロープ暗号化をかけて bytes として保存し、データ鍵は子どもごとに1本持ちます。
+2. 機微なテキストはフィールド単位で暗号化します。会話の原文、ペットの記憶、作品についての語りは、Cloud KMS のエンベロープ暗号化をかけて bytes として保存し、データ鍵は子どもごとに1本持ちます。開封したデータ鍵はサービスのプロセスのメモリ内で短時間だけキャッシュします（ラップ済みの暗号文と AAD をキーにし、TTL と容量は `packages/config` の `dekCache` を参照）。ディスクには書かず、ログにも出しません。子どもを停止または削除したあとは child レコードの読み取り自体が失敗するため、キャッシュされた鍵が再び使われることはありません。
 3. 分析には非識別化データだけを使います。BigQuery に入るデータは仮名ID（HMAC）だけを持ち、テキストの内容は一切含みません。
 4. 保存しなくて済むものは保存しません。録音は保存しません。タイピングの挙動は回数と所要時間だけを保存します。自宅の位置は子どもの端末にだけ保存します。
 5. 期限が来たら自動で削除します。保存期間は Firestore TTL と Cloud Storage のライフサイクルルールで適用します。
@@ -134,6 +134,8 @@ flowchart TD
 | platform | string | いいえ | ios\_pwa / android / desktop |
 | lastSeenAt | timestamp | はい | 最後に利用した時刻 |
 
+（2026-10-06 決定）子どものデバイス ID はトークンの SHA-256 です。子ども向けの API では自分のトークンの登録と削除だけを許可し、同じトークンを別の子どもや保護者に紐づけることは拒否します。ブラウザには childId／deviceId の経路識別子だけをキャッシュし、トークンやメッセージ本文は別途保存しません。購読解除、ログアウト、再ペアリングではまずローカルのバックグラウンド表示を止め、FCM が明確な失効エラーを返したあとにサーバー側が条件付きで古いデバイスのレコードを削除します。
+
 ### families/:familyId/pairingCodes/:code
 
 子どもの端末用のペアリングコードです。保護者が発行し、1回だけ使えます。
@@ -157,6 +159,8 @@ flowchart TD
 | acceptedAt | timestamp | いいえ | 承諾した時刻 |
 | acceptedBy | string | いいえ | 承諾した人の uid |
 
+ドキュメント ID は招待トークンの SHA-256 です。トークン（128 ビットの乱数。API での invitationId）は主保護者に1回だけ返し、データベースには原文を保存しません。承諾時はトークンのハッシュでルートコレクション `invitationLookup/{ハッシュ}`（familyId、expiresAt、usedAt。expiresAt は TTL フィールドとして使う）を引いて家庭を特定し、ログインしたメールアドレスが email と一致することを確かめます。
+
 ### deletionRequests/:requestId（ルートコレクション）
 
 削除リクエストはルートコレクションに置きます。こうすると、家庭のデータを削除したあとも削除の記録そのものは残り、あとから確認できます。ここには子どもに関する内容を一切保存しません。
@@ -169,7 +173,33 @@ flowchart TD
 | requesterRole | string | はい | child / guardian |
 | status | string | はい | accepted / running / completed / failed |
 | requestedAt | timestamp | はい | リクエストした時刻 |
+| firestoreClearedAt | timestamp | いいえ | オンラインのサブコレクションと通知の削除に成功した時刻。失敗時のリトライは未完了のステップから続ける |
+| deletionEventPublishedAt | timestamp | いいえ | 削除イベントの発行に成功した時刻。外部ストレージの削除が済んだことは意味しない。発行後の記録に失敗した場合や並行するリクエストでは重複して発行されることがあるため、消費側は冪等でなければならない |
 | completedAt | timestamp | いいえ | 完了した時刻 |
+
+### jobRuns/:runId（ルートコレクション）
+
+毎日のレベル判定ジョブをシャードに分けて実行するときの調整用レコードです。各 task は自分のシャードを書き終えたら taskIndex を doneTasks に加え、全シャードをそろえた task が BigQuery の異常検知を実行します。ジョブのメタデータだけで、子どもの識別子や内容は一切含みません。runId は日付と Cloud Run の実行 ID から算出します。
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| job | string | はい | risk-engine-daily |
+| date | string | はい | 集計対象の日付 YYYY-MM-DD |
+| taskCount | number | はい | シャード数 |
+| doneTasks | number[] | はい | 完了した taskIndex |
+| anomaliesStartedAt | timestamp | いいえ | 異常検知の開始時刻。1回だけ書く |
+| expiresAt | timestamp | はい | TTL フィールド。1週間保持する |
+
+### opsFlags/:flag（ルートコレクション）
+
+全体の運用スイッチです。現在は `opsFlags/voice` だけで、notifier が予算アラートを受け取り `pilot.voiceBreakerThreshold` に達したときに disabled = true を書き込みます。すると api は音声チケットを発行しなくなり、voice-relay は新しいセッションを拒否します。次の請求期間の最初の予算通知が届いたときに自動で復帰します。運用担当者が手動で止めるときは reason に別の値を書き、その場合は自動では再開しません。子どもの識別子や内容は一切含みません。
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| disabled | boolean | はい | true のとき音声を全体で停止する |
+| reason | string | はい | budget / budget_period_reset / 運用担当者が記入 |
+| period | string | いいえ | 発動時の請求期間の開始時刻（予算通知の costIntervalStart） |
+| updatedAt | timestamp | はい | 更新時刻 |
 
 ## ペット・会話・記憶
 
@@ -212,6 +242,26 @@ flowchart TD
 | turnCount | number | はい | 会話のターン数 |
 | safeMode | boolean | はい | 危機時のセーフモードに入ったことがあるかどうか |
 | expireAt | timestamp | はい | TTL フィールド |
+| adkState.gameSuggestionsDeclined | boolean | いいえ | 現在のテキストセッションでゲームをはっきり断ったかどうか。はっきり言い直したら false に戻る。真偽値だけを保存し、原文は保存しない。子どもの長期的なラベルにはせず、新しいセッションには引き継がない |
+
+### children/:childId/chatUsage/:date\_voice
+
+子どもごとの1日（東京の日付）の音声の利用量で、`voice.dailyMinutesPerChild` を適用するために使います。voice-relay はセッション終了時に今回の時間を加算し、api はチケット発行前に、voice-relay はセッション作成前に残り秒数を読みます。同じコレクションで日付ごとに会話のターン数を記録するドキュメントとは別にし、カウントだけで内容は持ちません。
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| seconds | number | はい | 当日の累計の音声秒数（セッションごとに切り上げてから加算） |
+| expireAt | timestamp | はい | TTL フィールド。2日間保持する |
+
+### children/:childId/chatUsage/:date\_proactive と proactiveTurns/:date-:slot
+
+（2026-10-06 実装）自発ターンはチャットの利用量とは独立で、JST の日付ごとにトランザクションで `turns` を先に確保します。既定では1日最大3回です（未定の値。`packages/config` を参照）。`chatUsage` ドキュメントには `turns` と `expireAt` だけを持ち、本文は含みません。
+
+`proactiveTurns` には、生成前に `status=running`、`leaseUntil`、`expireAt` を書き、完了後に `status=completed`、`localDate`、`slot`、`greeting`、任意の `petRequest`、`fallback`、`createdAt` を書きます。同じ日付と時間帯ではモデルを1回しか実行しません。処理中の重複リクエストには 409 を返し、完了後は結果を再送します。リースが切れた場合は固定の文言だけを補い、モデルを再び呼びません。保持期間は既定で7日ですが、物理的な削除は配備環境の TTL 設定に依存します。このドキュメントにチャットの記録は保存しません。
+
+完了時の記録には `petId`、`memoryRevision`、`modelHistoryResetAt`（timestamp または null）も保存します。生成完了のトランザクションでは、確保時の値と子どもの現在のこれらのフィールドを比較し、要約の忘却、履歴リセット境界の前進、ペットの変更があった場合は固定のあいさつだけを保存します。再送とホームの読み取りでも現在のバージョンと比較し、バージョンのない古い記録ではモデルの本文を表示しません。タスクのリトライでは固定の文言を補うだけで、モデルの再呼び出しやプッシュの再送はしません。
+
+子どものプッシュ通知が有効なときは、あいさつを永続化したあとにトランザクションで `pushStatus=claimed` を先に確保し、送信後に状態を記録します。重複したタスクが重ねて送ることはありませんが、プロセスの中断で日常のあいさつが1回抜けることはあり、確実な到達は保証しません。この方式は危機通知には使いません。お知らせがオフのとき、夜間、アカウントの停止／削除中、未終了の危機があるときは送りません。
 
 ### children/:childId/sessions/:sessionId/messages/:messageId
 
@@ -221,10 +271,13 @@ flowchart TD
 | contentEnc | bytes | はい | 暗号化したテキスト。音声メッセージは文字起こしを保存する |
 | inputMode | string | はい | typed / voice\_transcript / quick\_reply |
 | typing | map | いいえ | 子どもがタイピングしたメッセージのみ：keyCount、deleteCount、composeMs、longPauseCount |
-| crisisCheck | map | いいえ | 子どものメッセージのみ：hit、method（keyword / model）、score、checkedAt |
+| crisisCheck | map | いいえ | 子どものメッセージのみ：hit、method（keyword / model。モデルが使えないときは paused）、score、checkedAt。pendingReview が true のときは再審査待ちで、ペットのコンテキストには入れない。再審査後に false に戻し、recheckedAt を記録する |
+| replyState | string | いいえ | テキスト入力への応答状態：awaiting_review / generating / retryable / complete。応答の続行をトランザクションで取得できるのは、通過済みの awaiting_review か、ツールの副作用がないと明確な retryable だけ。中断の結果が不明なときはやり直しを開放しない |
 | modelInfo | map | いいえ | ペットのメッセージのみ：モデル名、レイテンシ、プロンプトのバージョン |
 | createdAt | timestamp | はい | 作成時刻 |
 | expireAt | timestamp | はい | TTL フィールド。L3・L4 に関係し、同意を得たメッセージは延長する |
+
+テキストのセッションには `latestInputMessageId`（ID のみ。本文は含まない）も保存します。応答の続行は最新の入力と一致しなければならず、元の messageId を再利用して、子どものメッセージを重ねて書いたり message.created を再発行したりしません。並行する取得、完了済み、再審査待ち、危機に該当、期限切れのコンテキストに対するリトライはいずれも拒否します。
 
 ### children/:childId/sessions/:sessionId/voiceFeatures/:utteranceId
 
@@ -249,6 +302,26 @@ flowchart TD
 | createdAt | timestamp | はい | 作成時刻 |
 
 子どもはすべての記憶を見ることも削除することもできます。削除は物理削除です。仮名の対応表は children/:childId/private/pseudonyms という1つのドキュメントに保存し、全体を暗号化します（mapEnc、bytes）。復号できるのはペット Agent サービスだけです。
+
+任意の意味検索では、さらに `characterId`、`petId`、同意の状態、有効期限で絞り込みます。ベクトルのフィールドは `embedding`（768 次元）、`embeddingModel`、`embeddingContentHash` です。`MEMORY_VECTOR_SEARCH=true` のときだけ、現在の子どもと現在のペットの同意済みの記憶にベクトルを補い、その子どものサブコレクション内で検索します。ベクトルは機微な派生データであり、内容の暗号化と同等ではなく、記憶と一緒に削除します。インデックスやモデルが使えないときはローカルの並べ替えにフォールバックし、未同意の記憶はどちらの経路にも入りません。
+
+（2026-10-06 実装）`mapEnc` には本名と `おともだちA/B/...` の組の配列を暗号化して保存し、`updatedAt` も別に持ちます。ADK の `beforeToolCallback` とツールの実行器は仮名化の処理を共有し、記憶の提案の書き込みと子ども側に返す確認の文言のどちらも仮名を使います。認識に失敗した場合、仮名化されていない記憶は保存しません。Vertex モードでは構造化された人名認識を使い、ローカルの scripted モードでは限られた語形のデモだけを提供します。いずれも任意の人名を完全に正確に認識するとは主張できません。
+
+### children/:childId.agentSummary
+
+ペットのターン6回ごとに最大1回、モデルによる要約を書きます。入力は直近16件の有効な child／pet メッセージに限り、危機、再審査待ち、期限切れ、記憶の消去より前のメッセージは除外します。書き込み前に子どもの状態、現在のペット、セッションの状態、消去フラグをもう一度確認し、処理中の生成が削除済みの内容を復活させないようにします。パラメータはすべて `packages/config` で管理します。
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| textEnc | bytes | 子どもの鍵で暗号化した粗い粒度の要約。新たに平文の text は保存しない |
+| approved | boolean | 新しい要約は必ず false。子どもが自分で確認するまで Agent のコンテキストには入れない |
+| petId | string | 要約が属するペット。ペットをまたいだ読み取りは禁止 |
+| approvedAt | timestamp | 子どもが確認した時刻。未確認のときは存在しない |
+| source | string | model / local_safe_template。ローカルのテンプレートをモデルの結果として扱わない |
+| sessionId / throughTurn | string / number | 冪等な書き込み位置 |
+| generatedAt / expiresAt | timestamp | 生成時刻と論理的な有効期限。既定で7日間保持する |
+
+読み取り時には、承認済みで、有効期限内で、ペットが一致する要約だけを使います。petId のない古い要約はコンテキストに入れません。子どもは設定ページで確認または忘却でき、保護者向けの読み取り API はありません。決定には暗号文の SHA-256 をバージョンとして添え、期限切れや置き換え済みのときは 409 を返します。忘却は要約を消し、`modelHistoryResetAt` と `memoryRevision` を進めて、古い履歴が再びモデルに入らないようにします。これは内容の利用に対する同意であって専門家による安全審査ではなく、既存の ADK の履歴の切り詰めの代わりにもなりません。埋め込みのフィールドには Firestore のドキュメント TTL が適用されないため、削除と保持の方針は子どもの情報と記憶の消去のフローに従います。
 
 ## 表現作品と生活シグナル
 
@@ -404,7 +477,7 @@ flowchart TD
 | anomalyRef | string | いいえ | BigQuery の異常検知結果への参照 |
 | inColdStart | boolean | はい | コールドスタート期間中かどうか |
 | rulesVersion | string | はい | リスクレベル分類ルールのバージョン |
-| explanation | map | はい | 保護者への通知に使う根拠：どの領域が、何日続いているか。原文は含まない |
+| explanation | map | はい | 領域、日数、explicit／crisis のフラグ。原文は含まない。explicit=true の days=1 は一度きりの表現であり、継続的な観察を意味しない。通知ではこの days を 0 に、changes を空に正規化するが、元のリスク記録は書き換えない |
 | computedAt | timestamp | はい | 計算した時刻 |
 
 ### children/:childId/consultations/:consultationId
@@ -421,8 +494,17 @@ flowchart TD
 | choiceAt | timestamp | いいえ | 選択した時刻 |
 | summaryEnc | bytes | いいえ | 子どもが添えることに同意した一文の要約。暗号化する |
 | childConfirmedSummary | boolean | いいえ | 子どもがこの要約を確認したかどうか |
-| followUpAt | timestamp | いいえ | 子どもが「いまはやめておく」を選んだあと、次にやさしく尋ねる時刻 |
+| followUpAt | timestamp | いいえ | 「自分で言う」「代わりに伝えて」、または L2 の「いまはやめておく」のあとのフォローアップの時刻。現在の間隔は3日で、専門家の確認待ち |
+| followUpRound | number | いいえ | 回答済みのフォローアップの回数。既定は 0 で、現在は最大3回 |
+| followUpAnswer | string | いいえ | talked / need_help / not_now / supported。子ども自身の状態だけで、保護者には返さない |
+| followUpState | string | いいえ | talked / later / needs_help / supported / paused。いじめが解決したことを意味しない |
+| followUpUpdatedAt | timestamp | いいえ | 最後にフォローアップに答えた時刻 |
+| followUpAnsweredAt | timestamp | いいえ | その件についての通常のフォローアップを止めた時刻。危機は閉じず、リスクレベルも変えない |
+| previousFollowupId | string | いいえ | まだ助けが必要という回答で新しい相談を作ったとき、前回のフォローアップの記録への関連付け |
+| followUpReason | string | いいえ | child_followup による新しい相談の need_help フラグ。Agent が手助けを続けるためのもので、原文は含まない |
 | notificationId | string | いいえ | 最終的に送った通知 |
+
+`children/:childId/followups/:followupId` には、各回の `{kind, sourceId, answer, answeredAt, result, consultationId?}` の記録を保存します。初回の ID は `consultation-{id}` / `crisis-{id}` で、以降は `~1` / `~2` を付け足します。同じ回答の重複送信は元の結果を再送し、誤って次の回に答えたことにはなりません。危機の記録にも上記のフォローアップのフィールドを持てますが、それによって `status` は変わりません。回答がないときはフォローアップ待ちの状態のままにし、自動で supported を補いません。
 
 ### families/:familyId/notifications/:notificationId
 
@@ -439,6 +521,7 @@ flowchart TD
 | attempts | array\<map> | はい | 送信ごとのチャネル、時刻、結果 |
 | acknowledgedAt | timestamp | いいえ | 保護者が確認した時刻 |
 | acknowledgedBy | string | いいえ | 確認した保護者 |
+| feedback | map | いいえ | 保護者の自己申告 `{action: talked/planned/need_help, updatedAt}`。確認とは別で、子どものフォローアップの回答は含まず、子どもの Agent には渡さない |
 | createdAt | timestamp | はい | 作成時刻 |
 
 ### children/:childId/crisisEvents/:crisisId
@@ -447,12 +530,12 @@ flowchart TD
 | --- | --- | --- | --- |
 | triggerType | string | はい | text / voice / artwork / island |
 | sourceRef | string | はい | きっかけになった元のドキュメント |
-| detection | map | はい | キーワードの一致、モデルのスコア、再確認の結果 |
+| detection | map | はい | キーワードの一致、モデルのスコア、再判定の結果。delayed が true のときは再審査の時点で判定したもの（モデルが使えず保留した入力） |
 | category | CrisisCategory | はい | self\_harm / violence / extortion / family\_harm / other。危機検知器またはペットの危機ツールが決める。判定できないときは other |
 | familyHarmSuspected | boolean | はい | category が family\_harm かどうかと同じ値。true のときは保護者に通知せず、それ以外のカテゴリはすべて通知する |
 | notificationId | string | いいえ | 送った危機通知 |
-| timeline | array\<map> | はい | 各ステップの動作と時刻：相談窓口の表示、子どもへの説明、通知、再送、確認 |
-| status | CrisisStatus | はい | 現在の状態 |
+| timeline | array\<map> | はい | 各ステップの動作と時刻：相談窓口の表示、子どもへの説明、通知、再送、確認、終了 |
+| status | CrisisStatus | はい | 現在の状態：open / guardian\_acknowledged / child\_acknowledged（家庭内での危害は子ども自身が確認する）/ closed。確認から24時間が経過したとき、または家庭内での危害では検知から7日が経過したときに、リスクエンジンの日次ジョブが closed に変える。読み取る側はそれより前から終了として扱う |
 | detailEnc | bytes | いいえ | 暗号化した関連部分。同意を得たときだけ保存する |
 | createdAt | timestamp | はい | 作成時刻 |
 
@@ -552,6 +635,7 @@ reviewed_by: 未定
 # rules/risk_rules.yaml
 cold_start_days: 28
 low_weight_domains: [d, k]
+low_weight_factor: 0.5 # L1、L2 の領域数では低重みの領域をこの係数で数える。当日の複数領域による L3 には関与しない
 levels:
   l1: { min_domains: 1, min_days: 7 }
   l2: { min_domains: 2, min_days: 7 }
@@ -586,6 +670,7 @@ levels:
 | notifications | kind、status、createdAt | 未確認の危機通知を見つけて再送する |
 | consultations | choice、followUpAt 昇順 | 期日が来て、もう一度尋ねる必要のある相談を見つける |
 | contextEvents | childIds 配列に含む、startDate 昇順 | ある子どものコンテキスト情報を取得する |
+| contextEvents | childIds 配列に含む、endDate 昇順 | 日次のレベル判定では判定ウィンドウと重なるコンテキスト情報だけを取り、ペットのコンテキストでは終わっていないものだけを取る |
 
 保存期間：messages、sessions、signals、artworks、islandScenes、petRequests はそれぞれ expireAt または expiresAt フィールドを持ち、Firestore TTL が削除します。island/current と dailyRituals は子どものアカウントがある間は残り、子どもを削除するときに一緒に削除します。具体的な日数は未定です（PRD を参照）。pairingCodes は expiresAt を使い、10分後に削除します。データベースでは7日間のポイントインタイムリカバリ（PITR）を有効にし、これとは別に定期バックアップを取ります。バックアップの保存期間は未定です。
 
