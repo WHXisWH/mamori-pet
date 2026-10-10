@@ -1,6 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import type { CharacterId, GradeBand } from '@ijime/api-types';
 import type { Firestore } from '@google-cloud/firestore';
-import { EnvelopeCipher, LocalKeyWrapper, type KeyWrapper } from '@ijime/crypto';
+import { dekCache } from '@ijime/config';
+import { CachingKeyWrapper, EnvelopeCipher, LocalKeyWrapper, type KeyWrapper } from '@ijime/crypto';
 
 export type ChildRecord = {
   childId: string;
@@ -21,6 +24,46 @@ export function childPath(familyId: string, childId: string): string {
   return `families/${familyId}/children/${childId}`;
 }
 
+// child を読むたびに DEK をアンラップする必要がある。アンラップ結果はプロセス内に短時間キャッシュする（docs/03「概要と設計原則」第2項）
+function withDekCache(wrapper: KeyWrapper): KeyWrapper {
+  return wrapper instanceof CachingKeyWrapper
+    ? wrapper
+    : new CachingKeyWrapper(wrapper, { ttlMs: dekCache.ttlMs, maxEntries: dekCache.maxEntries });
+}
+
+const requestScope = new AsyncLocalStorage<Map<string, Promise<ChildRecord | undefined>>>();
+
+// 1つのリクエストの中で実行する。その中では ScopedChildDirectory 経由の child の読み取りは1回だけ起きる
+export function withChildScope<T>(fn: () => T): T {
+  return requestScope.run(new Map(), fn);
+}
+
+// リクエストスコープの外（音声の常時接続、ジョブ）ではそのまま素通しする。リクエストをまたいで再利用せず、状態の変化は次のリクエストですぐに反映される。
+// 読めたレコードだけを覚える。読めなかったもの（未作成、停止済み）は覚えないので、同じリクエスト内であとから作成したレコードも読める
+export class ScopedChildDirectory implements ChildDirectory {
+  constructor(private readonly inner: ChildDirectory) {}
+
+  lookup(childId: string): Promise<ChildRecord | undefined> {
+    const memo = requestScope.getStore();
+    if (!memo) return this.inner.lookup(childId);
+    let pending = memo.get(childId);
+    if (!pending) {
+      pending = this.inner.lookup(childId);
+      memo.set(childId, pending);
+      const settled = pending;
+      void settled.then(
+        (r) => {
+          if (!r && memo.get(childId) === settled) memo.delete(childId);
+        },
+        () => {
+          if (memo.get(childId) === settled) memo.delete(childId);
+        },
+      );
+    }
+    return pending;
+  }
+}
+
 type ChildDoc = {
   status?: string;
   familyId: string;
@@ -37,7 +80,7 @@ export class FirestoreChildDirectory implements ChildDirectory {
     private readonly db: Firestore,
     wrapper: KeyWrapper,
   ) {
-    this.cipher = new EnvelopeCipher(wrapper);
+    this.cipher = new EnvelopeCipher(withDekCache(wrapper));
   }
 
   async lookup(childId: string): Promise<ChildRecord | undefined> {
@@ -79,7 +122,7 @@ export class DevChildDirectory implements ChildDirectory {
       characterId: 'moko',
     },
   ) {
-    this.wrapper = wrapper ?? new LocalKeyWrapper(Buffer.alloc(32, 7));
+    this.wrapper = withDekCache(wrapper ?? new LocalKeyWrapper(Buffer.alloc(32, 7)));
     this.cipher = new EnvelopeCipher(this.wrapper);
   }
 
@@ -145,8 +188,9 @@ export class LocalChildDirectory implements ChildDirectory {
     private readonly db: Firestore,
     wrapper: KeyWrapper = new LocalKeyWrapper(Buffer.alloc(32, 7)),
   ) {
-    this.stored = new FirestoreChildDirectory(db, wrapper);
-    this.fixtures = new DevChildDirectory(db, wrapper);
+    const cached = withDekCache(wrapper);
+    this.stored = new FirestoreChildDirectory(db, cached);
+    this.fixtures = new DevChildDirectory(db, cached);
   }
 
   async lookup(childId: string): Promise<ChildRecord | undefined> {

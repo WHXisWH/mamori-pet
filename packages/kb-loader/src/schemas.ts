@@ -186,6 +186,8 @@ const dailyRulesSchema = z.object({
 export const riskRulesSchema = z.object({
   cold_start_days: z.number().int().positive(),
   low_weight_domains: z.array(z.enum(DOMAINS)),
+  // 低重み領域は L1・L2 の領域数にこの係数で数える。当日の複数領域による L3 には参加せず、低重み領域だけのときはレベルを判定しない
+  low_weight_factor: z.number().min(0).max(1),
   levels: z.object({
     l1: levelRuleSchema,
     l2: levelRuleSchema,

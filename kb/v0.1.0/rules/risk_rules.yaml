@@ -1,6 +1,9 @@
 # 出典：docs/03-database.md「ナレッジベースとルールの保存」のレベル判定ルールの例。数値は docs/01-prd.md モジュール1のリスクレベル分類に従う
 cold_start_days: 28
 low_weight_domains: [d, k]
+# 低重み領域：当日の複数領域による L3 には参加しない。L1・L2 の領域数には low_weight_factor の係数で数える。
+# 低重み領域だけが逸脱しているときは、どのレベルにも判定しない（01-prd モジュール1「リスクレベル分類」）。係数は専門家レビュー待ち。
+low_weight_factor: 0.5
 levels:
   l1: { min_domains: 1, min_days: 7 }
   l2: { min_domains: 2, min_days: 7 }

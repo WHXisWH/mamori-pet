@@ -133,8 +133,53 @@ export const PENDING_DECISIONS: readonly PendingDecision[] = [
     status: 'pending',
     note: 'L3 で子どもが長時間答えないとき、内容を含まないお知らせを送るまでの待ち時間',
   },
+  {
+    key: 'consultation.followUpMaxRounds',
+    source: 'docs/03-database.md consultations.followUpRound（2026-10-07 決定）',
+    status: 'pending',
+    note: '同じ案件の通常のフォローアップを最大何回たずねるか。答え切ったら追加の問いかけを止める',
+  },
 
   // ペット Agent（docs/02-agent-architecture.md の1ターンのループとモデルルーティング）
+  {
+    key: 'agent.proactiveLeaseMs',
+    source: 'docs/02-agent-architecture.md「自発ターン（ペットから話しかける）」',
+    status: 'suggested',
+    note: '自発ターンのタスクの占有時間。1ターンのモデル呼び出しの上限30秒より長くし、タスク復旧時の二重実行を防ぐ',
+  },
+  {
+    key: 'agent.proactiveRetentionDays',
+    source: 'docs/02-agent-architecture.md「自発ターン（ペットから話しかける）」',
+    status: 'pending',
+    note: '生成したホームの挨拶を何日保持するか。短期間の再表示にだけ使う',
+  },
+  {
+    key: 'agent.summaryIntervalTurns',
+    source:
+      'docs/02-agent-architecture.md「ペット Agent（テキスト）の1ターンのループ」コンテキストの組み立て',
+    status: 'suggested',
+    note: '何ターンごとに会話の要約を生成するか。従来の間隔を維持する',
+  },
+  {
+    key: 'agent.modelArmorTimeoutMs',
+    source:
+      'docs/02-agent-architecture.md「ペット Agent（テキスト）の1ターンのループ」出力フィルター',
+    status: 'suggested',
+    note: 'Model Armor による出力検査の制限時間。1ターンの制限時間内に収める',
+  },
+  {
+    key: 'agent.childPushTimeoutMs',
+    source: 'docs/02-agent-architecture.md「自発ターン（ペットから話しかける）」',
+    status: 'suggested',
+    note: '子どもへの日常の声かけのプッシュ送信の制限時間。完了済みの自発ターンをいつまでも待たせない',
+  },
+  {
+    key: 'agent.pseudonymMapLimit',
+    source:
+      'docs/02-agent-architecture.md「ペット Agent（テキスト）の1ターンのループ」記憶の仮名化',
+    status: 'suggested',
+    note: '子どもごとに暗号化して保存する仮名の対応表の最大件数。モデルによる抽出の規模も制限する',
+  },
   {
     key: 'agent.maxToolCallsPerTurn',
     source: 'docs/02-agent-architecture.md「ペット Agent（テキスト）の1ターンのループ」',
@@ -301,6 +346,12 @@ export const PENDING_DECISIONS: readonly PendingDecision[] = [
     status: 'decided',
     note: '切断から5秒以内なら再接続する',
   },
+  {
+    key: 'voice.dailyMinutesPerChild',
+    source: 'docs/04-backend-api.md「サービス構成と共通規約」レート制限 音声分数の上限',
+    status: 'pending',
+    note: '子ども1人あたりの1日の音声分数の上限。上限に達したらセッションを終了し、その日は音声チケットを発行しない',
+  },
 
   // 信頼性の目標（docs/01-prd.md モジュール5 の非機能要件。推奨目標でレビュー待ち）
   {
@@ -395,5 +446,72 @@ export const PENDING_DECISIONS: readonly PendingDecision[] = [
     source: 'docs/04-backend-api.md「認証と権限」',
     status: 'suggested',
     note: '1つの家庭に登録できる子どもの人数。推奨値は5',
+  },
+  {
+    key: 'limits.pendingInvitationsPerFamily',
+    source: 'docs/04-backend-api.md「認証と権限」、docs/03-database.md invitations',
+    status: 'suggested',
+    note: '同じ家庭で同時に有効（未期限切れ・未承諾）な第二保護者の招待数',
+  },
+
+  {
+    key: 'crisis.quotaRetryDelayMs',
+    source: 'docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理',
+    status: 'suggested',
+    note: '429 または RESOURCE_EXHAUSTED のあと、バックオフして1回再試行するまでの待ち時間。推奨値は200ミリ秒',
+  },
+  {
+    key: 'crisis.quotaRetryJitterMs',
+    source: 'docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理',
+    status: 'suggested',
+    note: 'バックオフの待ち時間に加えるランダムなゆらぎの上限',
+  },
+  {
+    key: 'crisis.breakerWindowMs',
+    source: 'docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理',
+    status: 'pending',
+    note: 'サーキットブレーカーの集計ウィンドウ。設計書では1分',
+  },
+  {
+    key: 'crisis.breakerThreshold',
+    source: 'docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理',
+    status: 'pending',
+    note: 'ウィンドウ内でクォータ関連のエラーが何回連続したらサーキットブレーカーを開くか。設計書では5回',
+  },
+  {
+    key: 'crisis.breakerOpenMs',
+    source: 'docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理',
+    status: 'pending',
+    note: 'サーキットブレーカーを開いておく時間。設計書では30秒',
+  },
+  {
+    key: 'crisis.recheckDelaySeconds',
+    source: 'docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理',
+    status: 'pending',
+    note: '保留したメッセージが crisis-recheck に入ってから再審査するまでの時間',
+  },
+  {
+    key: 'dekCache.ttlMs',
+    source: 'docs/03-database.md「概要と設計原則」第2項（フィールド単位のエンベロープ暗号化）',
+    status: 'suggested',
+    note: 'アンラップ済みの DEK をプロセス内にどれくらい保持するか',
+  },
+  {
+    key: 'dekCache.maxEntries',
+    source: 'docs/03-database.md「概要と設計原則」第2項（フィールド単位のエンベロープ暗号化）',
+    status: 'suggested',
+    note: '1プロセスあたり何人分の子どもの DEK をキャッシュするか',
+  },
+  {
+    key: 'batch.weeklyReportShards',
+    source: 'docs/02-agent-architecture.md「通知文の作成と週次レポート」',
+    status: 'suggested',
+    note: '週次レポートを子ども単位でファンアウトするシャード数。負荷試験のあと所要時間に合わせて見直す',
+  },
+  {
+    key: 'pilot.*',
+    source: 'docs/01-prd.md「成功指標と検証計画」（2026-10-03 決定のパイロット負荷目標）',
+    status: 'pending',
+    note: 'パイロットの規模、モデルのクォータ、最初の文字と危機検知の遅延、可用性、ジョブの所要時間、子ども1人あたりのコスト、月予算とアラートの割合。負荷試験のあと見直す',
   },
 ];

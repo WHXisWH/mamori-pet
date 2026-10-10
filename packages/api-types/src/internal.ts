@@ -4,7 +4,7 @@ import type { HelpResource, PetAction } from './common.js';
 import type {
   Channel,
   ConsultChoice,
-  CrisisCategory,
+  CrisisHitCategory,
   Expression,
   PetRequestType,
   RiskLevel,
@@ -15,7 +15,7 @@ export type TurnReq = { childId: string; sessionId: string; messageId: string };
 export type TurnChunk =
   | { type: 'delta'; text: string }
   | { type: 'action'; action: PetAction }
-  | { type: 'done'; replyMessageId: string }
+  | { type: 'done'; replyMessageId: string; retryable?: boolean }
   // ペットが escalate_crisis を呼んだ場合。このターンはここで終了し、api が crisis.detected を発行して子どもに定型文を返す
   | { type: 'crisis'; crisisId: string };
 
@@ -42,7 +42,8 @@ export type VoiceServerMessage =
   | { type: 'interrupted' }
   | { type: 'action'; action: PetAction }
   | { type: 'crisis'; message: string; resources: HelpResource[] }
-  | { type: 'end'; reason: 'stop' | 'timeout' | 'crisis' | 'error' };
+  // limit：当日の音声分数を使い切った。unavailable：音声が全体で停止中（予算が上限に達した）
+  | { type: 'end'; reason: 'stop' | 'timeout' | 'crisis' | 'error' | 'limit' | 'unavailable' };
 
 // Pub/Sub イベントのペイロード：ID だけを渡し、内容は渡さない
 export type MessageCreatedEvent = {
@@ -69,6 +70,13 @@ export type ProactiveTurnRes = {
   petRequest?: { requestId: string; type: PetRequestType };
   fallback: boolean;
 };
+
+export type ProactiveDispatchRes = {
+  slot: ProactiveSlot;
+  localDate: string;
+  queued: number;
+  skipped: number;
+};
 export type CheckinCreatedEvent = { childId: string; kind: 'mood' | 'home'; checkinId: string };
 export type SignalExtractedEvent = { childId: string; domains: string[]; explicit: boolean };
 export type RiskLevelChangedEvent = {
@@ -80,7 +88,11 @@ export type RiskLevelChangedEvent = {
 export type CrisisDetectedEvent = {
   childId: string;
   crisisId: string;
+  category: CrisisHitCategory;
+  // 常に category === 'family_harm' と等しい
   familyHarmSuspected: boolean;
+  // 再審査でのヒット：保護者への通知に「検知遅延」を明記する
+  delayed?: boolean;
 };
 export type ConsultationResolvedEvent = {
   childId: string;
@@ -104,6 +116,3 @@ export const PUBSUB_TOPICS = [
   'data.deletion_requested',
 ] as const;
 export type PubSubTopic = (typeof PUBSUB_TOPICS)[number];
-
-// escalate_crisis ツールの reason 引数
-export type CrisisReason = Exclude<CrisisCategory, 'none'>;

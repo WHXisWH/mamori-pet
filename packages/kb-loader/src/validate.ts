@@ -1,6 +1,7 @@
 import type { GradeBand } from '@ijime/api-types';
 
 import { KbIntegrityError, type Kb } from './kb.js';
+import { loadQuickReplyCatalog, QUICK_REPLY_CATALOG_PATH } from './quick-replies.js';
 import {
   holidaysSchema,
   hotlinesSchema,
@@ -115,6 +116,7 @@ export async function loadSignalDefinitions(
 }
 
 export async function validateKnowledgeBase(kb: Kb): Promise<SourceRegistry> {
+  if (kb.has(QUICK_REPLY_CATALOG_PATH)) await loadQuickReplyCatalog(kb);
   const registry = await loadSourceRegistry(kb);
   const known = sourceIds(registry);
   const signals = await loadSignalDefinitions(kb);

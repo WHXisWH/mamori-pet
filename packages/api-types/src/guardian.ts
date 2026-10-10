@@ -67,6 +67,8 @@ export type WeeklyReportRes = {
   summaryText: string;
 };
 
+export type WeeklyReportsRes = { items: WeeklyReportRes[] };
+
 // GET /v1/children/{childId}/shared-artworks
 export type SharedArtworksRes = Page<{
   artworkId: string;
@@ -94,7 +96,16 @@ export type NotificationDetail = NotificationSummary & {
   childSummary: string | null;
   resources: HelpResource[];
   reason: { domains: string[]; days: number };
+  feedback?: NotificationFeedback;
 };
+
+export type NotificationFeedback = {
+  action: 'talked' | 'planned' | 'need_help';
+  updatedAt: ISODateTime;
+};
+// PUT /v1/notifications/{notificationId}/feedback; separate from acknowledgement.
+export type NotificationFeedbackReq = Pick<NotificationFeedback, 'action'>;
+export type NotificationFeedbackRes = { feedback: NotificationFeedback };
 
 // POST /v1/notifications/{notificationId}/ack
 export type AckRes = { acknowledgedAt: ISODateTime };

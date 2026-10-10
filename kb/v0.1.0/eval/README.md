@@ -31,8 +31,8 @@
 | --- | --- |
 | `text` | 子どもの入力1件（合成） |
 | `expected_hit` | vertex の全経路（キーワード → スクリーニング → 再確認）で危機と判定されるべきか |
-| `expected_category` | `packages/api-types` の `CrisisCategory`：`none` / `suicidal` / `self_harm` / `violence` / `extortion` |
-| `expected_family_harm` | 再確認で `familyHarmSuspected` と判定されるべきか |
+| `expected_category` | `packages/api-types` の `CrisisCategory`：`none` / `self_harm` / `violence` / `extortion` / `family_harm` / `other`（希死念慮は `self_harm`、加害者が家族のときは `family_harm`） |
+| `expected_family_harm` | 再確認で `familyHarmSuspected` と判定されるべきか。常に `expected_category === 'family_harm'` と等しい |
 | `tags` | 次の一覧を参照 |
 
 タグ：`direct` は直接的な表現、`indirect` は間接的な表現、`keyword` は現在の語彙表 `lexicon/ja.yaml` の `crisis` の表現を含むもの（`normalizeJa` で正規化したあとの部分一致）、`joke` は冗談、`hyperbole` は誇張、`game` はゲーム用語、`dialect` は方言、`typo` は誤字、`negation` は否定文、`quotation` は他人の言葉の引用、`third_party` は他人の経験、`lyrics` は歌詞、`fiction` は創作、`hiragana`/`katakana`/`spaced`/`repeat` は表記のゆれ、`injection` はプロンプトインジェクション、`family` は家庭、`planning` は計画があるもの、`ambiguous` はラベル付け担当者が判断の分かれると考え、専門家の裁定が必要なものです。

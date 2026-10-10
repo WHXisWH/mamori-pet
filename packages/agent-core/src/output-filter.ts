@@ -1,5 +1,3 @@
-import type { GradeBand } from '@ijime/api-types';
-import { agent as agentConfig } from '@ijime/config';
 import type { OutputFilterRules } from '@ijime/kb-loader';
 
 export type FilterVerdict = { ok: true } | { ok: false; ruleId: string };
@@ -21,10 +19,30 @@ export class OutputFilter {
   }
 }
 
-export function truncateAtSentence(text: string, gradeBand: GradeBand): string {
-  const max = agentConfig.replyMaxChars[gradeBand];
-  if (text.length <= max) return text;
-  const head = text.slice(0, max);
-  const cut = Math.max(head.lastIndexOf('。'), head.lastIndexOf('！'), head.lastIndexOf('？'));
-  return cut > 0 ? head.slice(0, cut + 1) : head;
+export function splitCompleteSentences(
+  text: string,
+  final: boolean,
+): {
+  complete: string[];
+  pending: string;
+} {
+  const complete: string[] = [];
+  const quotes: string[] = [];
+  const closers: Record<string, string> = { '「': '」', '『': '』', '“': '”' };
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+    if (closers[char]) quotes.push(closers[char]!);
+    else if (char === quotes.at(-1)) quotes.pop();
+    // Newlines and punctuation inside practice quotes cannot be sent on their own.
+    if (quotes.length === 0 && /[。！？!?]/u.test(char)) {
+      complete.push(text.slice(start, i + 1));
+      start = i + 1;
+    }
+  }
+  if (final && quotes.length === 0 && text.slice(start).trim()) {
+    complete.push(text.slice(start));
+    start = text.length;
+  }
+  return { complete, pending: text.slice(start) };
 }

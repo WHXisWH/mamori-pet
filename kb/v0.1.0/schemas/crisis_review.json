@@ -6,10 +6,7 @@
     },
     "category": {
       "type": "string",
-      "enum": ["none", "suicidal", "self_harm", "violence", "extortion"]
-    },
-    "familyHarmSuspected": {
-      "type": "boolean"
+      "enum": ["none", "self_harm", "violence", "extortion", "family_harm", "other"]
     },
     "confidence": {
       "type": "number",
@@ -20,5 +17,5 @@
       "type": "string"
     }
   },
-  "required": ["hit", "category", "familyHarmSuspected", "confidence"]
+  "required": ["hit", "category", "confidence"]
 }

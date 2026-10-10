@@ -23,7 +23,12 @@ export type PetAction =
       text: string;
       category: 'like' | 'event' | 'person' | 'other';
     }
-  | { type: 'offer_tell_adult'; consultationId: string }
+  | {
+      type: 'offer_tell_adult';
+      consultationId: string;
+      openingLine?: string;
+      source?: 'restored_followup';
+    }
   | { type: 'show_help_resources' }
   | { type: 'suggest_game'; game: GameType; requestId?: string }
   | { type: 'quick_replies'; options: string[] }

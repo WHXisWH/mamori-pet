@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createExtractorAgent } from './agent.js';
 import { checkSchema, type JsonSchema } from './json-schema.js';
 import { ScriptedLlm, type Script } from './scripted-llm.js';
-import { runStructured } from './structured.js';
+import { isQuotaError, runStructured } from './structured.js';
 
 const schema: JsonSchema = {
   type: 'object',
@@ -123,5 +123,34 @@ describe('runStructured', () => {
     await runStructured(agent, [{ text: 'えの せつめい' }, image], { schema, timeoutMs: 2000 });
     const user = llm.requests[0]!.contents.find((c) => c.role === 'user')!;
     expect(user.parts).toEqual([{ text: 'えの せつめい' }, image]);
+  });
+});
+
+describe('quota failures', () => {
+  it('recognises 429 and RESOURCE_EXHAUSTED in codes and messages', () => {
+    expect(isQuotaError('429', undefined)).toBe(true);
+    expect(isQuotaError(429, undefined)).toBe(true);
+    expect(isQuotaError('RESOURCE_EXHAUSTED', undefined)).toBe(true);
+    expect(isQuotaError('UNKNOWN_ERROR', 'got status: 429 Too Many Requests')).toBe(true);
+    expect(isQuotaError('UNKNOWN_ERROR', '{"status":"RESOURCE_EXHAUSTED"}')).toBe(true);
+    expect(isQuotaError('UNKNOWN_ERROR', 'internal error 500')).toBe(false);
+    expect(isQuotaError(undefined, undefined)).toBe(false);
+  });
+
+  it('reports a model 429 as quota and other model errors as model_error', async () => {
+    const quota = agentWith(() => {
+      throw new Error(JSON.stringify({ error: { code: 429, status: 'RESOURCE_EXHAUSTED' } }));
+    });
+    expect(await runStructured(quota.agent, 'x', { schema, timeoutMs: 1000 })).toMatchObject({
+      ok: false,
+      reason: 'quota',
+    });
+    const broken = agentWith(() => {
+      throw new Error(JSON.stringify({ error: { code: 500, status: 'INTERNAL' } }));
+    });
+    expect(await runStructured(broken.agent, 'x', { schema, timeoutMs: 1000 })).toMatchObject({
+      ok: false,
+      reason: 'model_error',
+    });
   });
 });

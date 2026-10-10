@@ -2,6 +2,7 @@ import type { Lexicon } from '@ijime/kb-loader';
 
 import {
   CrisisDetector,
+  type CrisisDetectorOptions,
   type CrisisInput,
   type CrisisReviewer,
   type ReviewResult,
@@ -21,12 +22,20 @@ export class KeywordConfirmReviewer implements CrisisReviewer {
 
   async review(input: CrisisInput): Promise<ReviewResult> {
     const m = this.matcher.match(input.text);
-    if (!m.hit) return { hit: false, category: 'none', familyHarmSuspected: false, confidence: 0 };
-    return { hit: true, category: 'suicidal', familyHarmSuspected: false, confidence: 0.5 };
+    if (!m.hit) return { hit: false, category: 'none', confidence: 0 };
+    return { hit: true, category: 'other', confidence: 0.5 };
   }
 }
 
-export function createNoModelDetector(lexicon: Lexicon): CrisisDetector {
+export function createNoModelDetector(
+  lexicon: Lexicon,
+  opts: CrisisDetectorOptions = {},
+): CrisisDetector {
   const matcher = KeywordMatcher.fromLexicon(lexicon);
-  return new CrisisDetector(matcher, new NoModelScreener(), new KeywordConfirmReviewer(matcher));
+  return new CrisisDetector(
+    matcher,
+    new NoModelScreener(),
+    new KeywordConfirmReviewer(matcher),
+    opts,
+  );
 }

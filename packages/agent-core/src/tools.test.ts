@@ -1,5 +1,7 @@
 import { InMemorySessionService } from '@google/adk';
-import type { PetAction, TurnChunk } from '@ijime/api-types';
+import { fileURLToPath } from 'node:url';
+import { CRISIS_HIT_CATEGORIES, type PetAction, type TurnChunk } from '@ijime/api-types';
+import { FsKbSource, Kb, loadQuickReplyCatalog, QUICK_REPLY_INTENTS } from '@ijime/kb-loader';
 import { describe, expect, it, vi } from 'vitest';
 import { createPetAgent } from './agent.js';
 import { PET_APP_NAME } from './firestore-session.js';
@@ -9,7 +11,6 @@ import { runPetTurn } from './turn.js';
 
 import {
   createPetTools,
-  CRISIS_REASONS,
   PET_TOOL_NAMES,
   petToolSchemas,
   type PetToolExecutor,
@@ -22,6 +23,9 @@ const ctx: TurnContext = {
   gradeBand: 'low',
   characterId: 'moko',
 };
+const quickReplyCatalog = await loadQuickReplyCatalog(
+  await Kb.load(new FsKbSource(fileURLToPath(new URL('../../../kb/v0.1.0', import.meta.url)))),
+);
 
 function executor(): PetToolExecutor {
   return {
@@ -44,6 +48,121 @@ function executor(): PetToolExecutor {
 }
 
 describe('pet tools', () => {
+  it.each(['high', 'jhs'] as const)(
+    'requires current child evidence before showing %s options',
+    async (gradeBand) => {
+      const actions: PetAction[] = [];
+      const tool = createPetTools(
+        executor(),
+        { ...ctx, gradeBand },
+        (a) => actions.push(a),
+        undefined,
+        {
+          quickReplyCatalog,
+        },
+      ).find((candidate) => candidate.name === 'offer_quick_replies')!;
+      expect(
+        await tool.runAsync({
+          args: { intents: ['listen_only', 'pause'] },
+          toolContext: {
+            userContent: { role: 'user', parts: [{ text: '今日は聞いていてほしい。' }] },
+          } as never,
+        }),
+      ).toEqual({ error: 'quick_reply_trigger_required' });
+      expect(actions).toEqual([]);
+    },
+  );
+  it('accepts communicative intents instead of arbitrary generated child utterances', () => {
+    expect(
+      petToolSchemas.offer_quick_replies.safeParse({ intents: ['continue_topic', 'pause'] })
+        .success,
+    ).toBe(true);
+    for (const args of [
+      { options: ['きいてあげる', 'なにして あそぶ？'] },
+      { intents: ['きいてあげる', 'pause'] },
+      { intents: ['pause', 'pause'] },
+      { intents: ['continue_topic', 'listen_only'] },
+    ])
+      expect(petToolSchemas.offer_quick_replies.strict().safeParse(args).success).toBe(false);
+  });
+
+  it.each(['low', 'high', 'jhs'] as const)(
+    'renders the %s catalog without business side effects',
+    async (gradeBand) => {
+      const ex = executor();
+      const actions: PetAction[] = [];
+      const tool = createPetTools(ex, { ...ctx, gradeBand }, (a) => actions.push(a), undefined, {
+        quickReplyCatalog,
+      }).find((candidate) => candidate.name === 'offer_quick_replies')!;
+      expect(tool._getDeclaration().parameters).toMatchObject({
+        required: ['intents'],
+        properties: { intents: { items: { enum: [...QUICK_REPLY_INTENTS] } } },
+      });
+      for (const intent of QUICK_REPLY_INTENTS.filter((value) => value !== 'pause')) {
+        const options = [quickReplyCatalog[gradeBand][intent], quickReplyCatalog[gradeBand].pause];
+        expect(
+          await tool.runAsync({
+            args: {
+              intents: [intent, 'pause'],
+              ...(gradeBand !== 'low'
+                ? {
+                    trigger: { kind: 'requested', evidenceSpan: '候補を見せて' },
+                  }
+                : {}),
+            },
+            toolContext: {
+              userContent: { role: 'user', parts: [{ text: '候補を見せて' }] },
+            } as never,
+          }),
+        ).toEqual({ ok: true, options });
+        expect(actions.at(-1)).toEqual({ type: 'quick_replies', options });
+      }
+      for (const method of Object.values(ex)) expect(method).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['requested', 'hesitating'] as const)(
+    'rejects invented %s trigger evidence',
+    async (kind) => {
+      const actions: PetAction[] = [];
+      const tool = createPetTools(
+        executor(),
+        { ...ctx, gradeBand: 'high' },
+        (a) => actions.push(a),
+        undefined,
+        {
+          quickReplyCatalog,
+        },
+      ).find((candidate) => candidate.name === 'offer_quick_replies')!;
+      expect(
+        await tool.runAsync({
+          args: {
+            intents: ['listen_only', 'pause'],
+            trigger: { kind, evidenceSpan: '候補を見せて' },
+          },
+          toolContext: {
+            userContent: { role: 'user', parts: [{ text: '今日は本を読んだよ。' }] },
+          } as never,
+        }),
+      ).toEqual({ error: 'quick_reply_trigger_required' });
+      expect(actions).toEqual([]);
+    },
+  );
+
+  it('does not fall back to model-written labels when a catalog is unavailable', async () => {
+    const actions: PetAction[] = [];
+    const tool = createPetTools(executor(), ctx, (a) => actions.push(a)).find(
+      (candidate) => candidate.name === 'offer_quick_replies',
+    )!;
+    expect(
+      await tool.runAsync({
+        args: { intents: ['continue_topic', 'pause'] },
+        toolContext: {} as never,
+      }),
+    ).toEqual({ error: 'quick_replies_unavailable' });
+    expect(actions).toEqual([]);
+  });
+
   it('declares the 11 tools from the API doc with matching names', () => {
     const ex = executor();
     const tools = createPetTools(ex, ctx, () => {});
@@ -63,7 +182,13 @@ describe('pet tools', () => {
     )!;
     const description = tool._getDeclaration().description!;
     expect(description).toContain('現在続いている・差し迫った身体的暴力');
-    expect(description).toContain('家庭内を含む');
+    expect(description).toContain('family_harm');
+    expect(tool._getDeclaration().parameters).toMatchObject({
+      required: ['category'],
+      properties: {
+        category: { enum: ['self_harm', 'violence', 'extortion', 'family_harm', 'other'] },
+      },
+    });
     expect(description).toContain('仲間外れ・無視・口げんかだけを violence と扱わない');
     expect(description).toContain('search_skill');
     expect(description).toContain('show_help_resources');
@@ -141,38 +266,51 @@ describe('pet tools', () => {
     expect(ex.escalateCrisis).not.toHaveBeenCalled();
   });
 
-  it.each(CRISIS_REASONS)(
+  it.each(CRISIS_HIT_CATEGORIES)(
     'keeps %s available without consent or an ordinary tool budget',
-    async (reason) => {
+    async (category) => {
       const ex = executor();
       const tool = createPetTools(ex, ctx, () => {}, undefined, { maxToolCalls: 0 }).find(
         (t) => t.name === 'escalate_crisis',
       )!;
-      expect(await tool.runAsync({ args: { reason }, toolContext: {} as never })).toEqual({
+      expect(await tool.runAsync({ args: { category }, toolContext: {} as never })).toEqual({
         crisisId: 'cr_1',
       });
-      expect(ex.escalateCrisis).toHaveBeenCalledWith(ctx, reason);
+      expect(ex.escalateCrisis).toHaveBeenCalledWith(ctx, category);
+    },
+  );
+
+  it.each([{ reason: 'suicidal' }, {}, { category: 'sad' }])(
+    'escalates invalid crisis arguments %j as other instead of dropping them',
+    async (args) => {
+      const ex = executor();
+      const tool = createPetTools(ex, ctx, () => {}).find((t) => t.name === 'escalate_crisis')!;
+      expect(await tool.runAsync({ args, toolContext: {} as never })).toEqual({ crisisId: 'cr_1' });
+      expect(ex.escalateCrisis).toHaveBeenCalledWith(ctx, 'other');
     },
   );
 
   it('front-end action tools emit PetAction and reserve game suggestions', async () => {
     const ex = executor();
     const actions: PetAction[] = [];
-    const tools = createPetTools(ex, ctx, (a) => actions.push(a));
+    const tools = createPetTools(ex, ctx, (a) => actions.push(a), undefined, { quickReplyCatalog });
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     await byName['set_expression']!.runAsync({
       args: { expression: 'caring' },
       toolContext: {} as never,
     });
     await byName['offer_quick_replies']!.runAsync({
-      args: { options: ['はれ', 'くもり'] },
+      args: { intents: ['continue_topic', 'pause'] },
       toolContext: {} as never,
     });
     await byName['show_help_resources']!.runAsync({ args: {}, toolContext: {} as never });
     await byName['suggest_game']!.runAsync({ args: { type: 'drawing' }, toolContext: {} as never });
     expect(actions).toEqual([
       { type: 'set_expression', expression: 'caring' },
-      { type: 'quick_replies', options: ['はれ', 'くもり'] },
+      {
+        type: 'quick_replies',
+        options: [quickReplyCatalog.low.continue_topic, quickReplyCatalog.low.pause],
+      },
       { type: 'show_help_resources' },
       { type: 'suggest_game', game: 'drawing' },
     ]);
@@ -193,7 +331,7 @@ describe('pet tools', () => {
     expect(actions).toEqual([]);
     expect(await run('show_help_resources', {})).toEqual({ ok: true });
     expect(await run('start_tell_adult', {})).toEqual({ consultationId: 'cs_1' });
-    expect(await run('escalate_crisis', { reason: 'violence' })).toEqual({ crisisId: 'cr_1' });
+    expect(await run('escalate_crisis', { category: 'violence' })).toEqual({ crisisId: 'cr_1' });
   });
 
   it('fails closed on an unavailable game reservation', async () => {
@@ -254,14 +392,35 @@ describe('pet tools', () => {
     expect(actions).toEqual([{ type: 'offer_tell_adult', consultationId: 'cs_1' }]);
     expect(
       await byName['escalate_crisis']!.runAsync({
-        args: { reason: 'suicidal' },
+        args: { category: 'self_harm' },
         toolContext: {} as never,
       }),
     ).toEqual({
       crisisId: 'cr_1',
     });
-    expect(ex.escalateCrisis).toHaveBeenCalledWith(ctx, 'suicidal');
+    expect(ex.escalateCrisis).toHaveBeenCalledWith(ctx, 'self_harm');
   });
+
+  it.each([undefined, '', '   ', '  「ねえ、ちょっと はなしたい ことが あるの。」  '])(
+    'passes only a nonempty grounded opening to both model and help action: %j',
+    async (openingLine) => {
+      const ex = executor();
+      ex.startTellAdult = vi.fn(async () => ({
+        consultationId: 'cs_1',
+        ...(openingLine !== undefined ? { openingLine } : {}),
+      }));
+      const actions: PetAction[] = [];
+      const tool = createPetTools(ex, ctx, (action) => actions.push(action)).find(
+        (item) => item.name === 'start_tell_adult',
+      )!;
+      const expected = {
+        consultationId: 'cs_1',
+        ...(openingLine?.trim() ? { openingLine: openingLine.trim() } : {}),
+      };
+      expect(await tool.runAsync({ args: {}, toolContext: {} as never })).toEqual(expected);
+      expect(actions).toEqual([{ type: 'offer_tell_adult', ...expected }]);
+    },
+  );
 
   it('turns executor failures into a model-visible result when onToolError is given', async () => {
     const ex = executor();
@@ -290,20 +449,30 @@ describe('pet tools', () => {
   });
 
   it('schemas reject bad arguments', () => {
-    expect(petToolSchemas.offer_quick_replies.safeParse({ options: ['a'] }).success).toBe(false);
+    expect(petToolSchemas.offer_quick_replies.safeParse({ intents: ['pause'] }).success).toBe(
+      false,
+    );
     expect(
-      petToolSchemas.offer_quick_replies.safeParse({ options: ['a', 'b', 'c', 'd'] }).success,
+      petToolSchemas.offer_quick_replies.safeParse({
+        intents: ['continue_topic', 'listen_only', 'unsure', 'pause'],
+      }).success,
     ).toBe(false);
-    expect(petToolSchemas.escalate_crisis.safeParse({ reason: 'sad' }).success).toBe(false);
+    expect(petToolSchemas.escalate_crisis.safeParse({ category: 'sad' }).success).toBe(false);
+    expect(petToolSchemas.escalate_crisis.safeParse({ reason: 'violence' }).success).toBe(false);
     expect(petToolSchemas.record_mood.safeParse({ weather: 'snowy' }).success).toBe(false);
     expect(petToolSchemas.set_expression.safeParse({ expression: 'angry' }).success).toBe(false);
   });
 
   it('counts individual tool calls and keeps safety tools available after exhaustion', async () => {
     const ex = executor();
-    const tools = createPetTools(ex, ctx, () => {});
+    const tools = createPetTools(ex, ctx, () => {}, undefined, { quickReplyCatalog });
     const run = (name: string, args: Record<string, unknown>) =>
       tools.find((t) => t.name === name)!.runAsync({ args, toolContext: {} as never });
+    expect(await run('set_expression', { expression: 'happy' })).toEqual({ ok: true });
+    expect(await run('offer_quick_replies', { intents: ['continue_topic', 'pause'] })).toEqual({
+      ok: true,
+      options: [quickReplyCatalog.low.continue_topic, quickReplyCatalog.low.pause],
+    });
     await run('recall', { topic: '学校' });
     await run('recall', { topic: '友達' });
     await run('recall', { topic: '家' });
@@ -311,7 +480,8 @@ describe('pet tools', () => {
       error: 'tool_budget_exhausted',
     });
     expect(ex.recordMood).not.toHaveBeenCalled();
-    expect(await run('escalate_crisis', { reason: 'violence' })).toEqual({ crisisId: 'cr_1' });
+    expect(await run('set_expression', { expression: 'caring' })).toEqual({ ok: true });
+    expect(await run('escalate_crisis', { category: 'violence' })).toEqual({ crisisId: 'cr_1' });
     expect(await run('start_tell_adult', {})).toEqual({ consultationId: 'cs_1' });
     expect(await run('show_help_resources', {})).toEqual({ ok: true });
   });
@@ -323,9 +493,16 @@ describe('pet tools', () => {
     });
     const tool = createPetTools(executor(), ctx, (a) => actions.push(a), undefined, {
       filter,
+      quickReplyCatalog: {
+        ...quickReplyCatalog,
+        low: { ...quickReplyCatalog.low, listen_only: '絶対秘密' },
+      },
     }).find((t) => t.name === 'offer_quick_replies')!;
     expect(
-      await tool.runAsync({ args: { options: ['絶対秘密', 'あとで'] }, toolContext: {} as never }),
+      await tool.runAsync({
+        args: { intents: ['listen_only', 'pause'] },
+        toolContext: {} as never,
+      }),
     ).toEqual({ error: 'output_blocked' });
     expect(actions).toEqual([]);
   });

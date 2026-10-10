@@ -10,6 +10,8 @@ import {
   crisisResponse,
   loadHotlines,
   loadSafeModeCopy,
+  routingOfCheck,
+  routingOfRecord,
   safeModeMessage,
   type SafeModeCopy,
 } from './response.js';
@@ -27,17 +29,26 @@ beforeAll(async () => {
 });
 
 describe('crisisResponse', () => {
-  it('gives the child-facing hotlines and grade copy normally', () => {
-    const r = crisisResponse({ familyHarmSuspected: false, gradeBand: 'low', copy, hotlines });
-    expect(r.resources.map((h) => h.id).sort()).toEqual(['childline', 'sos_dial']);
-    expect(r.message).toBe(safeModeMessage(copy.low));
-  });
+  it.each(['low', 'high', 'jhs'] as const)(
+    'keeps child-facing hotlines and adds the existing emergency resource for %s',
+    (gradeBand) => {
+      const r = crisisResponse({ familyHarmSuspected: false, gradeBand, copy, hotlines });
+      expect(r.resources.map((h) => h.id).sort()).toEqual(['childline', 'emergency', 'sos_dial']);
+      expect(r.resources.find((h) => h.id === 'emergency')).toBe(
+        hotlines.find((h) => h.id === 'emergency'),
+      );
+      expect(r.message).toBe(safeModeMessage(copy[gradeBand]));
+    },
+  );
 
-  it('gives child guidance centre and police when harm points at the family', () => {
-    const r = crisisResponse({ familyHarmSuspected: true, gradeBand: 'jhs', copy, hotlines });
-    expect(r.resources.map((h) => h.id).sort()).toEqual(['emergency', 'jidou_soudan']);
-    expect(r.message).toBe(safeModeMessage(copy.family_harm));
-  });
+  it.each(['low', 'high', 'jhs'] as const)(
+    'keeps child guidance centre and emergency resources for family harm in %s',
+    (gradeBand) => {
+      const r = crisisResponse({ familyHarmSuspected: true, gradeBand, copy, hotlines });
+      expect(r.resources.map((h) => h.id).sort()).toEqual(['emergency', 'jidou_soudan']);
+      expect(r.message).toBe(safeModeMessage(copy.family_harm));
+    },
+  );
 });
 
 describe('safeModeMessage', () => {
@@ -62,6 +73,47 @@ describe('createNoModelDetector', () => {
   });
 });
 
+describe('crisis routing', () => {
+  it('maps a check to an event category, defaulting to other', () => {
+    expect(routingOfCheck({ category: 'violence' })).toEqual({
+      category: 'violence',
+      familyHarmSuspected: false,
+    });
+    expect(routingOfCheck({ category: 'family_harm' })).toEqual({
+      category: 'family_harm',
+      familyHarmSuspected: true,
+    });
+    expect(routingOfCheck({ category: 'none' })).toEqual({
+      category: 'other',
+      familyHarmSuspected: false,
+    });
+  });
+
+  it('reads stored records and keeps legacy records without category conservative', () => {
+    expect(routingOfRecord({ category: 'extortion', familyHarmSuspected: false })).toEqual({
+      category: 'extortion',
+      familyHarmSuspected: false,
+    });
+    expect(routingOfRecord({ category: 'family_harm' })).toEqual({
+      category: 'family_harm',
+      familyHarmSuspected: true,
+    });
+    expect(routingOfRecord({ familyHarmSuspected: true })).toEqual({
+      category: 'family_harm',
+      familyHarmSuspected: true,
+    });
+    expect(routingOfRecord({})).toEqual({ category: 'family_harm', familyHarmSuspected: true });
+    expect(routingOfRecord({ familyHarmSuspected: false })).toEqual({
+      category: 'other',
+      familyHarmSuspected: false,
+    });
+    expect(routingOfRecord({ category: 'suicidal', familyHarmSuspected: false })).toEqual({
+      category: 'other',
+      familyHarmSuspected: false,
+    });
+  });
+});
+
 describe('crisisEventDoc', () => {
   it('records detection metadata only, never the text', () => {
     const now = new Date('2026-10-01T00:00:00Z');
@@ -70,7 +122,7 @@ describe('crisisEventDoc', () => {
       sourceRef: 'families/f/children/c/sessions/s/messages/m',
       check: {
         hit: true,
-        category: 'suicidal',
+        category: 'self_harm',
         familyHarmSuspected: false,
         method: 'review',
         keywordMatched: true,
@@ -80,7 +132,12 @@ describe('crisisEventDoc', () => {
       },
       now,
     });
-    expect(doc).toMatchObject({ triggerType: 'voice', status: 'open', familyHarmSuspected: false });
+    expect(doc).toMatchObject({
+      triggerType: 'voice',
+      status: 'open',
+      category: 'self_harm',
+      familyHarmSuspected: false,
+    });
     expect(JSON.stringify(doc)).not.toContain('死にたい');
   });
 });

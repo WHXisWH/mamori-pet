@@ -5,3 +5,4 @@ export * from './content.js';
 export * from './validate.js';
 export * from './review.js';
 export * from './games.js';
+export * from './quick-replies.js';

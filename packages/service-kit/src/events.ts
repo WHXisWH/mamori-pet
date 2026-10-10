@@ -1,6 +1,7 @@
 import {
   CHANNELS,
   CONSULT_CHOICES,
+  CRISIS_HIT_CATEGORIES,
   DOMAINS,
   RISK_LEVELS,
   type PubSubTopic,
@@ -41,7 +42,11 @@ export const eventSchemas = {
   'crisis.detected': z.strictObject({
     childId: id,
     crisisId: id,
+    // 省略可：ローリングデプロイ中は旧バージョンの発行元が category を付けない。フィールドの欠落より危機イベントの破棄のほうが危険
+    category: z.enum(CRISIS_HIT_CATEGORIES).optional(),
     familyHarmSuspected: z.boolean(),
+    // 再審査でのヒット：保護者への通知に「検知遅延」を明記する
+    delayed: z.boolean().optional(),
   }),
   'consultation.resolved': z.strictObject({
     childId: id,

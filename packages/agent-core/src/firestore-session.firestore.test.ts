@@ -88,6 +88,42 @@ describe('FirestoreSessionService', () => {
     expect(msgs[1]?.text).toBe('そっか…それは つらかったね。');
   });
 
+  it('keeps messages awaiting crisis recheck out of the model history until cleared', async () => {
+    const s = await svc.createSession({ appName: PET_APP_NAME, userId: 'c_t_pending' });
+    await svc.writeChildMessage('c_t_pending', s.id, {
+      text: 'まえの はなし',
+      inputMode: 'typed',
+      crisisCheck: { hit: false, method: 'none', score: 0, checkedAt: new Date() },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    const { messageId } = await svc.writeChildMessage('c_t_pending', s.id, {
+      text: 'まだ しらべてない',
+      inputMode: 'typed',
+      crisisCheck: {
+        hit: false,
+        method: 'paused',
+        score: 0,
+        checkedAt: new Date(),
+        pendingReview: true,
+      },
+    });
+    const history = async () =>
+      (await svc.getSession({
+        appName: PET_APP_NAME,
+        userId: 'c_t_pending',
+        sessionId: s.id,
+      }))!.events.map((e) => e.content?.parts?.[0]?.text);
+    expect(await history()).toEqual(['まえの はなし']);
+    expect((await svc.readMessages('c_t_pending', s.id)).map((m) => m.text)).toEqual([
+      'まえの はなし',
+      'まだ しらべてない',
+    ]);
+    await db
+      .doc(`families/f_dev_c_t_pending/children/c_t_pending/sessions/${s.id}/messages/${messageId}`)
+      .update({ 'crisisCheck.pendingReview': false });
+    expect(await history()).toEqual(['まえの はなし', 'まだ しらべてない']);
+  });
+
   it('skips writing user events when the api owns child messages, keeps tool events as system', async () => {
     const owned = new FirestoreSessionService(db, new DevChildDirectory(db), {
       writeUserEvents: false,

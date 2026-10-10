@@ -32,7 +32,15 @@ export type MessageDoc = {
   partsEnc?: Buffer;
   inputMode: 'typed' | 'voice_transcript' | 'quick_reply' | 'model' | 'tool';
   typing?: TypingMetrics;
-  crisisCheck?: { hit: boolean; method: string; score: number; checkedAt: Date };
+  // pendingReview：モデルが利用できないときに保留して再審査を待っているメッセージ。ペットのコンテキストには入れない
+  crisisCheck?: {
+    hit: boolean;
+    method: string;
+    score: number;
+    checkedAt: Date;
+    pendingReview?: boolean;
+    recheckedAt?: Date;
+  };
   modelInfo?: { model: string; latencyMs: number; promptVersion: string };
   invocationId?: string;
   createdAt: Date | Timestamp;
@@ -220,6 +228,7 @@ export class FirestoreSessionService extends BaseSessionService {
       )
         continue;
       if (!['child', 'pet', 'system'].includes(message.role)) continue;
+      if (message.crisisCheck?.pendingReview === true) continue;
       // Tools can contain recalled memories. They must never enter the extractive summary.
       if (
         i >= limit &&
@@ -335,6 +344,20 @@ export class FirestoreSessionService extends BaseSessionService {
     });
   }
 
+  async setGameSuggestionsDeclined(
+    childId: string,
+    sessionId: string,
+    declined: boolean,
+  ): Promise<void> {
+    const { child, sessions } = await this.paths(childId);
+    await this.mutateSession(child, sessionId, (tx, current) => {
+      if (current.endedAt || current.safeMode) throw new Error('session_not_available');
+      tx.update(this.db.doc(`${sessions}/${sessionId}`), {
+        'adkState.gameSuggestionsDeclined': declined,
+      });
+    });
+  }
+
   async writeChildMessage(
     childId: string,
     sessionId: string,
@@ -428,6 +451,7 @@ export class FirestoreSessionService extends BaseSessionService {
           text: string;
           inputMode: MessageDoc['inputMode'];
           typing?: TypingMetrics;
+          crisisCheck?: MessageDoc['crisisCheck'];
           createdAt: Date;
         };
         prior: { role: MessageRole; text: string }[];
@@ -462,6 +486,7 @@ export class FirestoreSessionService extends BaseSessionService {
       text: string;
       inputMode: MessageDoc['inputMode'];
       typing?: TypingMetrics;
+      crisisCheck?: MessageDoc['crisisCheck'];
       createdAt: Date;
     } = {
       role: m.role,
@@ -470,6 +495,7 @@ export class FirestoreSessionService extends BaseSessionService {
       createdAt,
     };
     if (m.typing) message.typing = m.typing;
+    if (m.crisisCheck) message.crisisCheck = m.crisisCheck;
     return { message, prior };
   }
 

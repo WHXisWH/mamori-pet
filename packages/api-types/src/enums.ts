@@ -48,7 +48,13 @@ export type NotifyChannel = (typeof NOTIFY_CHANNELS)[number];
 export const NOTIFY_STATUSES = ['queued', 'sent', 'delivered', 'acknowledged', 'failed'] as const;
 export type NotifyStatus = (typeof NOTIFY_STATUSES)[number];
 
-export const CRISIS_STATUSES = ['open', 'guardian_acknowledged', 'closed'] as const;
+// child_acknowledged：家庭内危害のイベントは、子ども自身がセーフモード画面で「いまは安全」と確認する（2026-10-10 決定）
+export const CRISIS_STATUSES = [
+  'open',
+  'guardian_acknowledged',
+  'child_acknowledged',
+  'closed',
+] as const;
 export type CrisisStatus = (typeof CRISIS_STATUSES)[number];
 
 export const DATA_SOURCES = [
@@ -71,14 +77,20 @@ export const NOTIFICATION_KINDS = [
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
+// family_harm だけは保護者に通知しない。判断できないときは other にする（2026-10-03、2026-10-05 決定）
 export const CRISIS_CATEGORIES = [
   'none',
-  'suicidal',
   'self_harm',
   'violence',
   'extortion',
+  'family_harm',
+  'other',
 ] as const;
 export type CrisisCategory = (typeof CRISIS_CATEGORIES)[number];
+export type CrisisHitCategory = Exclude<CrisisCategory, 'none'>;
+export const CRISIS_HIT_CATEGORIES = CRISIS_CATEGORIES.filter(
+  (c): c is CrisisHitCategory => c !== 'none',
+);
 
 export const EXPRESSIONS = [
   'happy',

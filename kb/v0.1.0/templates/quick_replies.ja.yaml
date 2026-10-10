@@ -1,0 +1,22 @@
+# Product-authored child utterances; not clinically validated or expert approved.
+low:
+  continue_topic: もうすこし はなしたい
+  listen_only: きいていてほしい
+  practice_telling: おとなへの つたえかたを れんしゅうしたい
+  change_topic: べつの はなしをしたい
+  unsure: まだ わからない
+  pause: いまは おしまい
+high:
+  continue_topic: もう少し話したい
+  listen_only: 今は聞いていてほしい
+  practice_telling: 大人への伝え方を練習したい
+  change_topic: 別の話をしたい
+  unsure: まだわからない
+  pause: 今はここまでにする
+jhs:
+  continue_topic: もう少し話したい
+  listen_only: 今は聞いていてほしい
+  practice_telling: 大人への伝え方を練習したい
+  change_topic: 別の話をしたい
+  unsure: まだわからない
+  pause: 今はここまでにする

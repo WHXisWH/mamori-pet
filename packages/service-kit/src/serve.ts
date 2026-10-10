@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 
 import { serve } from '@hono/node-server';
-import { loadEnv } from '@ijime/config';
+import { lifecycle, loadEnv } from '@ijime/config';
 
 import type { ServiceApp } from './app.js';
 import { Logger } from './logger.js';
@@ -32,7 +32,8 @@ export function startService(
       }
       process.exit(0);
     });
-    setTimeout(() => process.exit(1), 10_000).unref();
+    (server as Server).closeIdleConnections();
+    setTimeout(() => process.exit(1), lifecycle.shutdownGraceMs).unref();
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('SIGINT', () => shutdown('SIGINT'));

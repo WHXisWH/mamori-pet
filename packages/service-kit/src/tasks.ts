@@ -1,6 +1,16 @@
-import { GoogleHttpError, type GoogleHttp } from './google-http.js';
+import { crisis as crisisConfig } from '@ijime/config';
+import { z } from 'zod';
 
-export type TaskQueueName = 'notify-send' | 'crisis-escalation' | 'consultation-timeout';
+import { AdcGoogleHttp, GoogleHttpError, type GoogleHttp } from './google-http.js';
+import { stableId } from './ids.js';
+
+export type TaskQueueName =
+  | 'notify-send'
+  | 'crisis-escalation'
+  | 'consultation-timeout'
+  | 'crisis-recheck'
+  | 'weekly-report'
+  | 'proactive-turns';
 
 export type TaskSpec = {
   queue: TaskQueueName;
@@ -77,4 +87,84 @@ export class CloudTasksRestQueue implements TaskQueue {
       throw err;
     }
   }
+}
+
+// モデルが利用できないときに保留した子どものメッセージ。signal-worker があとから危機検知をやり直す（docs/02「危機検知器」モデルが利用できないときの処理 第2項）。
+// タスクには ID だけを入れ、子どもの入力は含めない。
+export const CRISIS_RECHECK_PATH = '/internal/tasks/crisis-recheck';
+
+const recheckId = z.string().min(1).max(128);
+export const crisisRecheckTaskSchema = z.strictObject({
+  familyId: recheckId,
+  childId: recheckId,
+  sessionId: recheckId,
+  messageId: recheckId,
+  channel: z.enum(['text', 'voice']),
+});
+export type CrisisRecheckTask = z.infer<typeof crisisRecheckTaskSchema>;
+
+export function crisisRecheckSpec(signalWorkerUrl: string, task: CrisisRecheckTask): TaskSpec {
+  return {
+    queue: 'crisis-recheck',
+    url: `${signalWorkerUrl}${CRISIS_RECHECK_PATH}`,
+    body: task,
+    delaySeconds: crisisConfig.recheckDelaySeconds,
+    taskId: `recheck-${stableId(task.childId, task.sessionId, task.messageId)}`,
+  };
+}
+
+export type CrisisRecheckRequester = (task: CrisisRecheckTask) => Promise<void>;
+
+export function crisisRecheckRequester(
+  queue: TaskQueue,
+  signalWorkerUrl: string,
+): CrisisRecheckRequester {
+  return (task) => queue.enqueue(crisisRecheckSpec(signalWorkerUrl, task));
+}
+
+// ローカル開発ではメモリ上のキューを使う（タスクは実行されない）。本番は Cloud Tasks を使い、sa-tasks の身元で signal-worker を呼び出す
+export function crisisRecheckRequesterFromEnv(opts: {
+  prod: boolean;
+  projectId: string | undefined;
+  location: string;
+}): CrisisRecheckRequester {
+  if (!opts.prod)
+    return crisisRecheckRequester(
+      new MemoryTaskQueue(),
+      process.env['SIGNAL_WORKER_URL'] ?? 'http://localhost:8084',
+    );
+  const url = process.env['SIGNAL_WORKER_URL'];
+  const invoker = process.env['TASKS_INVOKER_SA'];
+  if (!url || !invoker || !opts.projectId)
+    throw new Error('missing env SIGNAL_WORKER_URL / TASKS_INVOKER_SA / GCP_PROJECT_ID');
+  return crisisRecheckRequester(
+    new CloudTasksRestQueue({
+      projectId: opts.projectId,
+      location: opts.location,
+      invokerServiceAccount: invoker,
+      audience: url,
+      http: new AdcGoogleHttp(),
+    }),
+    url,
+  );
+}
+
+// 予定した自発ターンは子どもの ID と日付だけを渡し、子どもの内容を Cloud Tasks に入れない。
+export const PROACTIVE_TURNS_PATH = '/internal/proactive-turns';
+
+const proactiveId = z.string().min(1).max(128);
+export const proactiveTurnTaskSchema = z.strictObject({
+  childId: proactiveId,
+  slot: z.enum(['morning', 'after_school', 'bedtime']),
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type ProactiveTurnTask = z.infer<typeof proactiveTurnTaskSchema>;
+
+export function proactiveTurnSpec(petAgentUrl: string, task: ProactiveTurnTask): TaskSpec {
+  return {
+    queue: 'proactive-turns',
+    url: `${petAgentUrl}${PROACTIVE_TURNS_PATH}`,
+    body: task,
+    taskId: `proactive-${stableId(task.childId, task.localDate, task.slot)}`,
+  };
 }

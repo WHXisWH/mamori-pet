@@ -19,6 +19,7 @@ export type InstructionInput = {
   status: ChildContext;
   memories: readonly string[];
   voice: boolean;
+  restoredHelp?: boolean;
 };
 
 export function fillTemplate(template: string, vars: Record<string, string>): string {
@@ -45,6 +46,13 @@ export function statusVars(
     pendingConsultation: status.pendingConsultationId
       ? `あり (${JSON.stringify(status.pendingConsultationId)}${status.followUpAt ? `, ${status.followUpAt}` : ''})`
       : 'なし',
+    helpAttempt: status.helpAttempt
+      ? JSON.stringify({
+          ...(status.helpAttempt.choice ? { choice: status.helpAttempt.choice } : {}),
+          state: status.helpAttempt.state,
+          followUp: status.helpAttempt.followUp,
+        })
+      : 'なし',
     careFlag: status.careFlag ? 'いつもより気にかけて声をかける' : 'なし',
   };
 }
@@ -57,10 +65,16 @@ export async function buildPetInstruction(kb: Kb, input: InstructionInput): Prom
     kb.text(PROMPT_PATHS.status),
   ]);
   const layers = [
-    fillTemplate(charter, { petName: input.petName }),
+    fillTemplate(charter, {
+      petName: input.petName,
+      replyMaxChars: String(agent.replyMaxChars[input.gradeBand]),
+    }),
     persona,
     grade,
-    fillTemplate(status, statusVars(input.status, input.memories)),
+    fillTemplate(status, {
+      ...statusVars(input.status, input.memories),
+      restoredHelp: String(input.restoredHelp === true),
+    }),
   ];
   if (input.voice) layers.push(await kb.text(PROMPT_PATHS.voice));
   return layers.map((l) => l.trim()).join('\n\n');

@@ -21,6 +21,7 @@ import type {
   PetRequestType,
   RitualKind,
 } from './enums.js';
+import type { ProactiveSlot } from './internal.js';
 
 // POST /v1/child/pair（ログイン不要）  エラー：PAIRING_CODE_EXPIRED、INVALID_ARGUMENT
 export type PairReq = { code: string };
@@ -46,7 +47,12 @@ export type ChildHomeRes = {
   rituals?: DailyRituals;
   petRequests?: PetRequest[];
   pendingConsultation?: { consultationId: string };
+  // 家庭内危害の危機を子ども自身が「いまは安全」と確認してから 24 時間は、ホームに 189 を固定表示する（2026-10-10 決定）
+  careHotline?: HelpResource;
 };
+
+// POST /v1/child/crisis-acknowledgements：子どもがセーフモード画面で「いまは安全」と確認する。家庭内危害のイベントにだけ効く
+export type CrisisAckRes = { acknowledged: number };
 
 // ペットの島
 export type IslandSummary = {
@@ -135,6 +141,8 @@ export type CharactersRes = {
     archetype: string;
     palette: { main: string; sub: string };
     voicePreviewUrl: string;
+    locked?: boolean;
+    unlockProgress?: { current: number; required: number };
   }[];
 };
 
@@ -147,6 +155,8 @@ export type ChildPreferencesBody = {
   gradeBand: GradeBand;
   nickname?: string;
   ttsEnabled?: boolean;
+  proactiveEnabled?: boolean;
+  proactiveSlots?: ProactiveSlot[];
 };
 
 // POST /v1/child/chat/sessions
@@ -171,8 +181,18 @@ export type SseEvent =
   | { event: 'meta'; data: { messageId: string; safeMode: boolean } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'action'; data: PetAction }
+  | { event: 'review'; data: Extract<ChatSafetyRes, { status: 'pending_review' }> }
   | { event: 'crisis'; data: { crisisId: string; message: string; resources: HelpResource[] } }
-  | { event: 'done'; data: { replyMessageId: string } };
+  | { event: 'done'; data: { replyMessageId: string; retryable?: boolean } };
+
+// GET /v1/child/chat/sessions/{sessionId}/safety
+export type ChatSafetyRes =
+  | { status: 'clear'; resumeMessageId?: string }
+  | { status: 'pending_review'; messageId: string; message: string; resources: HelpResource[] }
+  | { status: 'crisis'; crisis: { crisisId: string; message: string; resources: HelpResource[] } };
+
+// POST /v1/child/chat/sessions/{sessionId}/messages/{messageId}/reply -> SseEvent
+// No text body: resumes the saved, reviewed input, not a new submission.
 
 // GET /v1/child/chat/sessions/{sessionId}/messages
 export type MessagesRes = Page<{
@@ -226,6 +246,10 @@ export type IslandReq = {
 export type IslandRes = { sceneId: string; petPrompt: string; crisis?: CrisisPayload };
 
 // GET /v1/child/memories
+export type AgentSummaryRes = {
+  summary: { version: string; text: string; approved: boolean; expiresAt: string } | null;
+};
+
 export type MemoriesRes = Page<{
   memoryId: string;
   text: string;
@@ -283,8 +307,13 @@ export type FollowupsRes = {
     crisisId?: string;
   }[];
 };
-export type FollowupAnswerReq = { answer: 'talked' | 'need_help' | 'not_now' };
-export type FollowupAnswerRes = { status: 'answered'; consultationId?: string };
+export type FollowupAnswerReq = { answer: 'talked' | 'need_help' | 'not_now' | 'supported' };
+export type FollowupAnswerRes = {
+  status: 'answered';
+  consultationId?: string;
+  continuation?: 'scheduled' | 'paused' | 'supported' | 'help_requested';
+  dueAt?: ISODateTime;
+};
 
 // POST /v1/child/data-deletion-requests
 export type DeletionRes = { requestId: string; status: 'accepted' };

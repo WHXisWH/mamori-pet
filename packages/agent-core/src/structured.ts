@@ -7,7 +7,8 @@ import { abortable } from './abortable.js';
 // テキスト、またはテキストと画像などのマルチモーダルなパーツ（作品特徴抽出は inlineData で画像を渡す。メモリ上だけで扱う）
 export type StructuredInput = string | Part[];
 
-export type StructuredFailure = 'timeout' | 'model_error' | 'invalid_json' | 'schema';
+// quota：429 / RESOURCE_EXHAUSTED。呼び出し側はこれを見てバックオフ再試行とサーキットブレーカーを判断する
+export type StructuredFailure = 'timeout' | 'quota' | 'model_error' | 'invalid_json' | 'schema';
 
 export type StructuredResult<T> =
   | { ok: true; value: T; attempts: number }
@@ -21,6 +22,16 @@ export type StructuredOptions<T> = {
   // schema 以外の業務上の検証（禁止語、長さなど）。false を返すと不合格として扱う
   accept?: (value: T) => boolean;
 };
+
+const QUOTA = /RESOURCE_EXHAUSTED|\b429\b/;
+
+export function isQuotaError(code: unknown, message: unknown): boolean {
+  return (
+    String(code) === '429' ||
+    String(code) === 'RESOURCE_EXHAUSTED' ||
+    (typeof message === 'string' && QUOTA.test(message))
+  );
+}
 
 function extractJson(text: string): unknown {
   const trimmed = text.trim();
@@ -53,7 +64,12 @@ async function once<T>(
       abortSignal: controller.signal,
     });
     for await (const ev of abortable(events, controller.signal)) {
-      if (ev.errorCode || ev.errorMessage) return { ok: false, reason: 'model_error', attempts: 1 };
+      if (ev.errorCode || ev.errorMessage)
+        return {
+          ok: false,
+          reason: isQuotaError(ev.errorCode, ev.errorMessage) ? 'quota' : 'model_error',
+          attempts: 1,
+        };
       if (controller.signal.aborted) break;
       if (ev.content?.role === 'model' && !ev.partial)
         text =
@@ -62,10 +78,15 @@ async function once<T>(
             .map((p) => p.text ?? '')
             .join('') || text;
     }
-  } catch {
+  } catch (err) {
+    const e = err as { status?: unknown; code?: unknown; message?: unknown } | undefined;
     return {
       ok: false,
-      reason: controller.signal.aborted ? 'timeout' : 'model_error',
+      reason: controller.signal.aborted
+        ? 'timeout'
+        : isQuotaError(e?.status ?? e?.code, e?.message)
+          ? 'quota'
+          : 'model_error',
       attempts: 1,
     };
   } finally {

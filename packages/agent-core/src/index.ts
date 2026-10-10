@@ -9,3 +9,7 @@ export * from './firestore-session.js';
 export * from './turn.js';
 export * from './json-schema.js';
 export * from './structured.js';
+export * from './voice-usage.js';
+export * from './memory-retrieval.js';
+export * from './callbacks.js';
+export { gamePreferenceChange, loadGamePreferenceRules } from './game-preference.js';

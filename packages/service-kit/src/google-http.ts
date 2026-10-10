@@ -3,6 +3,9 @@ export type GoogleRequest = {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   query?: Record<string, string>;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  retry?: boolean;
 };
 
 export class GoogleHttpError extends Error {
@@ -29,7 +32,14 @@ function withQuery(url: string, query?: Record<string, string>): string {
 // アプリケーションのデフォルト認証情報（Cloud Run のサービスアカウント）で Google REST API を呼び出す
 export class AdcGoogleHttp implements GoogleHttp {
   private client: Promise<{
-    request<T>(o: { url: string; method: string; data?: unknown }): Promise<{ data: T }>;
+    request<T>(o: {
+      url: string;
+      method: string;
+      data?: unknown;
+      signal?: AbortSignal;
+      timeout?: number;
+      retry?: boolean;
+    }): Promise<{ data: T }>;
   }>;
 
   constructor(scopes: string[] = ['https://www.googleapis.com/auth/cloud-platform']) {
@@ -45,6 +55,9 @@ export class AdcGoogleHttp implements GoogleHttp {
         url: withQuery(req.url, req.query),
         method: req.method,
         ...(req.body === undefined ? {} : { data: req.body }),
+        ...(req.signal ? { signal: req.signal } : {}),
+        ...(req.timeoutMs === undefined ? {} : { timeout: req.timeoutMs }),
+        ...(req.retry === undefined ? {} : { retry: req.retry }),
       });
       return res.data;
     } catch (err) {
@@ -76,6 +89,7 @@ export class PlainHttp implements GoogleHttp {
       method: req.method,
       headers: { 'Content-Type': 'application/json' },
       ...(req.body === undefined ? {} : { body: JSON.stringify(req.body) }),
+      ...(req.signal ? { signal: req.signal } : {}),
     });
     const text = await res.text();
     if (!res.ok) throw new GoogleHttpError(res.status, text);

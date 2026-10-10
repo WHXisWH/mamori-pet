@@ -97,27 +97,45 @@ export class ScriptedLlm extends BaseLlm {
 export function petDemoScript(): Script {
   return ({ lastUserText: t, toolResults }) => {
     const already = new Set(toolResults.map((r) => r.name));
+    if (t.startsWith('# ペットからの日常の声かけ')) {
+      if (!already.has('set_expression'))
+        return { calls: [{ name: 'set_expression', args: { expression: 'together' } }] };
+      return {
+        text: t.includes('時間帯: morning')
+          ? 'おはよう！きょうも じぶんの ペースで いこうね。'
+          : t.includes('時間帯: after_school')
+            ? 'おかえり！ここで ゆっくり していってね。'
+            : 'きょうも おつかれさま。ゆっくり やすんでね。',
+      };
+    }
     const crisis = /死にたい|消えたい|いなくなりたい|しにたい|きえたい/.test(t);
     const bullied = /無視|むし|ハブ|なぐ|たた|いじめ|お金|とられ/.test(t);
     const sad = /つらい|かなしい|悲し|いや|こわい|泣|さみし|寂し/.test(t);
     const happy = /たのし|楽し|うれし|嬉し|やった|すき|好き/.test(t);
     const remember = /おぼえて|覚えて/.test(t);
+    const tellAdult =
+      /(?:おとな|大人|せんせい|先生)に\s*(?:はなしたい|話したい|つたえたい|伝えたい|そうだんしたい|相談したい)/.test(
+        t,
+      );
 
     if (crisis && !already.has('escalate_crisis')) {
-      return { calls: [{ name: 'escalate_crisis', args: { reason: 'suicidal' } }] };
+      return { calls: [{ name: 'escalate_crisis', args: { category: 'self_harm' } }] };
     }
-    if (bullied && !already.has('start_tell_adult')) {
+    if (tellAdult && !already.has('start_tell_adult')) {
+      return { calls: [{ name: 'start_tell_adult', args: {} }] };
+    }
+    if (tellAdult) return { text: 'はなしてくれて ありがとう。つたえかたを いっしょに えらぼう。' };
+    if (bullied && !already.has('search_skill')) {
       return {
         calls: [
           { name: 'set_expression', args: { expression: 'worried' } },
           { name: 'search_skill', args: { query: '無視 排除 ハブられた' } },
-          { name: 'start_tell_adult', args: { reason: 'exclusion' } },
         ],
       };
     }
     if (bullied) {
       return {
-        text: 'それは とても つらかったね。はなしてくれて ありがとう。このこと、おとなに つたえるのは どう？',
+        text: 'それは とても つらかったね。はなしてくれて ありがとう。いまは きいていて ほしい？',
       };
     }
     if (remember && !already.has('remember')) {
@@ -134,7 +152,7 @@ export function petDemoScript(): Script {
       if (sad)
         calls.push({
           name: 'offer_quick_replies',
-          args: { options: ['きいて ほしい', 'ほかの はなし', 'いまは いい'] },
+          args: { intents: ['listen_only', 'change_topic', 'pause'] },
         });
       return { calls };
     }

@@ -13,6 +13,8 @@ import { lexiconSchema, type Kb } from '@ijime/kb-loader';
 import {
   CrisisDetector,
   type CrisisInput,
+  ModelCallError,
+  type CrisisDetectorOptions,
   type CrisisReviewer,
   type ReviewResult,
   type SemanticScreener,
@@ -50,13 +52,18 @@ async function classify<T>(
     }),
     { schema, signal, timeoutMs: models[purpose].timeoutMs ?? 1500, maxAttempts: 1 },
   );
-  if (!result.ok) throw new Error(`crisis_${kind}_${result.reason}`);
+  if (!result.ok)
+    throw new ModelCallError(
+      result.reason === 'quota' ? 'quota' : result.reason === 'timeout' ? 'timeout' : 'error',
+      result.reason === 'quota' || result.reason === 'timeout' ? undefined : result.reason,
+    );
   return result.value;
 }
 
 export function createModelDetector(
   options: ModelOptions,
   keywords: KeywordMatcher,
+  detectorOptions: CrisisDetectorOptions = {},
 ): CrisisDetector {
   const screener: SemanticScreener = {
     screen: (input, signal) => classify<{ suspect: boolean }>(options, 'screen', input, signal),
@@ -64,29 +71,31 @@ export function createModelDetector(
   const reviewer: CrisisReviewer = {
     review: async (input, signal) => {
       const value = await classify<ReviewResult>(options, 'review', input, signal);
-      if (value.hit === (value.category === 'none')) throw new Error('crisis_review_inconsistent');
+      if (value.hit === (value.category === 'none'))
+        throw new ModelCallError('error', 'inconsistent_verdict');
       if (
         value.hit &&
         (!value.evidenceSpan ||
           ![input.text, ...input.priorTurns].some((t) => t.includes(value.evidenceSpan!)))
       ) {
-        throw new Error('crisis_review_invalid_evidence');
+        throw new ModelCallError('error', 'invalid_evidence');
       }
       return value;
     },
   };
-  return new CrisisDetector(keywords, screener, reviewer);
+  return new CrisisDetector(keywords, screener, reviewer, detectorOptions);
 }
 
 export async function createRuntimeDetector(
   kb: Kb,
   env: NodeJS.ProcessEnv = process.env,
+  detectorOptions: CrisisDetectorOptions = {},
 ): Promise<CrisisDetector> {
   const lexicon = await kb.yaml('lexicon/ja.yaml', lexiconSchema);
   const mode =
     env['CRISIS_MODEL_MODE'] ?? (env['NODE_ENV'] === 'production' ? 'vertex' : 'scripted');
   if (mode === 'scripted' && env['NODE_ENV'] !== 'production')
-    return createNoModelDetector(lexicon);
+    return createNoModelDetector(lexicon, detectorOptions);
   if (mode !== 'vertex') throw new Error('CRISIS_MODEL_MODE must be vertex in production');
   const projectId = env['GCP_PROJECT_ID'];
   const location = env['GCP_REGION'] ?? REGION;
@@ -101,5 +110,6 @@ export async function createRuntimeDetector(
       reviewModel: createGemini('crisisReview', { projectId, location }),
     },
     KeywordMatcher.fromLexicon(lexicon),
+    detectorOptions,
   );
 }

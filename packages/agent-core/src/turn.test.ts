@@ -92,6 +92,30 @@ const actionTypes = (chunks: TurnChunk[]) =>
   chunks.filter((c) => c.type === 'action').map((c) => (c as { action: PetAction }).action.type);
 
 describe('runPetTurn', () => {
+  it.each([
+    [9000, null],
+    [16000, 'SAFE'],
+  ] as const)(
+    'bounds the default first response wait at a %i ms model delay',
+    async (delayMs, fallback) => {
+      vi.useFakeTimers();
+      try {
+        const agent = createPetAgent({
+          model: new ScriptedLlm(() => ({ text: 'そっか。' }), { delayMs }),
+          instruction: 'test',
+          tools: [],
+        });
+        const running = turn(() => ({ text: '' }), 'やあ', { agent });
+        await vi.advanceTimersByTimeAsync(delayMs + 1);
+        const { outcome } = await running;
+        expect(outcome.fallback).toBe(fallback);
+        expect(outcome.replyText).toBe(fallback ?? 'そっか。');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('allows real tool progress before the first visible sentence', async () => {
     vi.useFakeTimers();
     try {
@@ -294,21 +318,27 @@ describe('runPetTurn', () => {
     },
   );
 
-  it('the agent decides to call tools: exclusion → search_skill + start_tell_adult', async () => {
+  it('scripted exclusion offers support without assuming consent to tell an adult', async () => {
     const { chunks, ex, outcome } = await turn(petDemoScript(), 'きょう みんなに 無視された');
-    expect(ex.calls).toEqual(['search:無視 排除 ハブられた', 'tell']);
-    expect(actionTypes(chunks)).toEqual(['set_expression', 'offer_tell_adult']);
-    expect(outcome.toolCalls).toEqual(['set_expression', 'search_skill', 'start_tell_adult']);
+    expect(ex.calls).toEqual(['search:無視 排除 ハブられた']);
+    expect(actionTypes(chunks)).toEqual(['set_expression']);
+    expect(outcome.toolCalls).toEqual(['set_expression', 'search_skill']);
     expect(deltas(chunks).join('')).toContain('つらかったね');
+  });
+
+  it('scripted explicit help request opens the consultation, not a notification', async () => {
+    const { chunks, ex } = await turn(petDemoScript(), 'おとなに はなしたい');
+    expect(ex.calls).toEqual(['tell']);
+    expect(actionTypes(chunks)).toContain('offer_tell_adult');
   });
 
   it('escalate_crisis is called as a backstop when the model sees crisis language', async () => {
     const script: Script = ({ toolResults }) =>
       toolResults.length === 0
-        ? { calls: [{ name: 'escalate_crisis', args: { reason: 'suicidal' } }] }
+        ? { calls: [{ name: 'escalate_crisis', args: { category: 'self_harm' } }] }
         : { text: '話してくれてありがとう。' };
     const { ex } = await turn(script, 'もう消えたい');
-    expect(ex.calls).toEqual(['crisis:suicidal']);
+    expect(ex.calls).toEqual(['crisis:self_harm']);
   });
 
   it('blocks a forbidden sentence, drops the rest and sends the safe reply', async () => {
@@ -346,6 +376,38 @@ describe('runPetTurn', () => {
     expect(
       session.events.find((event) => event.id === outcome.replyMessageId)?.content?.parts,
     ).toEqual([{ text: outcome.replyText }]);
+  });
+
+  it.each([
+    'おかあさんに はなす れんしゅう、\nいっしょに やろうね。\n\n「ねえ、ちょっと はなしたい\nことが あるの。きいてくれる？」\nから はじめてみよう。',
+    'いっしょに れんしゅうしよう。\n「せんせい。\nすこし はなしたいことが あるんです。きょうの ほうかごに きいてもらえますか？」',
+  ])('does not stream a partial practice quote when the reply exceeds its budget', async (text) => {
+    const { outcome, chunks, session } = await turn(() => ({ text }), 'れんしゅうしたい', {
+      gradeBand: 'low',
+    });
+    expect(outcome.fallback).toBeNull();
+    expect(outcome.replyText).toBe(text.slice(0, text.indexOf('。') + 1));
+    expect(deltas(chunks).join('')).toBe(outcome.replyText);
+    expect(
+      session.events.find((event) => event.id === outcome.replyMessageId)?.content?.parts,
+    ).toEqual([{ text: outcome.replyText }]);
+  });
+
+  it('keeps a complete short quoted example, including punctuation inside the quote', async () => {
+    const text = '「せんせい。\nおはなし きいて。」と いってみよう。';
+    const { chunks, outcome } = await turn(() => ({ text }), 'れんしゅうしたい', {
+      gradeBand: 'low',
+    });
+    expect(deltas(chunks)).toEqual([text]);
+    expect(outcome.replyText).toBe(text);
+  });
+
+  it('does not expose an over-budget first sentence as a chopped fragment', async () => {
+    const { outcome } = await turn(() => ({ text: 'あ'.repeat(80) + '。' }), 'やあ', {
+      gradeBand: 'low',
+    });
+    expect(outcome.replyText).toBe('SAFE');
+    expect(outcome.fallback).toBe('SAFE');
   });
 
   it('falls back to the safe reply when the model errors', async () => {

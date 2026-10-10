@@ -5,21 +5,23 @@ import {
   createEvent,
   type AppendEventRequest,
   type BaseSessionService,
+  type GetSessionRequest,
   type LlmAgent,
   type Session,
 } from '@google/adk';
 import type { GradeBand, PetAction, TurnChunk } from '@ijime/api-types';
 import { agent as agentConfig } from '@ijime/config';
 
+import { bindModelTurnBudget } from './agent.js';
 import { PET_APP_NAME } from './firestore-session.js';
-import { truncateAtSentence, type OutputFilter } from './output-filter.js';
-import { SENTENCE_SPLIT } from './scripted-llm.js';
+import { splitCompleteSentences, type OutputFilter } from './output-filter.js';
 
 export type TurnInput = {
   agent: LlmAgent;
   sessionService: BaseSessionService;
   childId: string;
   sessionId: string;
+  messageId?: string;
   text: string;
   gradeBand: GradeBand;
   filter: OutputFilter;
@@ -42,12 +44,32 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
   const controller = new AbortController();
   let session: Session | undefined;
   let pendingReply: AppendEventRequest | undefined;
+  let modelToolCallSeen = false;
+  let inFlightWrites = 0;
+  let persistenceFailed = false;
   // ADK persists before yielding. Defer final text so history contains only the filtered, actually sent reply.
   const sessionService = new Proxy(input.sessionService, {
     get(target, key) {
+      if (key === 'getSession' && input.messageId)
+        return async (request: GetSessionRequest) => {
+          const loaded = await target.getSession(request);
+          if (!loaded) return loaded;
+          // The API already saved this input; Runner appends it again as newMessage, including on retry.
+          return {
+            ...loaded,
+            events: loaded.events.filter(
+              (event) =>
+                event.id !== input.messageId ||
+                event.content?.role !== 'user' ||
+                event.content.parts?.some((part) => part.functionCall || part.functionResponse),
+            ),
+          };
+        };
       if (key === 'appendEvent')
         return async (request: AppendEventRequest) => {
           session = request.session;
+          if (request.event.content?.parts?.some((part) => part.functionCall))
+            modelToolCallSeen = true;
           if (
             request.event.content?.role === 'model' &&
             !request.event.content.parts?.some((part) => part.functionCall)
@@ -56,7 +78,15 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
             return request.event;
           }
           if (controller.signal.aborted) return request.event;
-          return target.appendEvent(request);
+          inFlightWrites += 1;
+          try {
+            return await target.appendEvent(request);
+          } catch (error) {
+            persistenceFailed = true;
+            throw error;
+          } finally {
+            inFlightWrites -= 1;
+          }
         };
       const value: unknown = Reflect.get(target, key);
       return typeof value === 'function' ? value.bind(target) : value;
@@ -73,12 +103,20 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
   const firstTokenMs = input.firstTokenTimeoutMs ?? agentConfig.firstTokenTimeoutMs;
   const turnMs = input.turnTimeoutMs ?? agentConfig.turnTimeoutMs;
   const started = Date.now();
+  const releaseModelBudget = bindModelTurnBudget(input.agent.canonicalModel, controller.signal, {
+    deadlineMs: started + turnMs,
+    firstResponseTimeoutMs: firstTokenMs,
+    ...(input.onLog ? { onLog: input.onLog } : {}),
+    onToolCall: () => {
+      modelToolCallSeen = true;
+    },
+  });
   let firstModelEventMs: number | null = null;
   let firstVisibleTextMs: number | null = null;
-  let firstTokenTimer: NodeJS.Timeout | undefined = setTimeout(
-    () => controller.abort(),
-    firstTokenMs,
-  );
+  // Bounded Gemini owns per-request first-response cancellation; this timer is only for other models.
+  let firstTokenTimer: NodeJS.Timeout | undefined = releaseModelBudget
+    ? undefined
+    : setTimeout(() => controller.abort(), firstTokenMs);
   const turnTimer = setTimeout(() => controller.abort(), turnMs);
 
   const toolCalls: string[] = [];
@@ -150,9 +188,9 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
       } else {
         pending = text.startsWith(sent) ? text.slice(sent.length) : text;
       }
-      const pieces = pending.split(SENTENCE_SPLIT);
-      const complete = ev.partial ? pieces.slice(0, -1) : pieces;
-      pending = ev.partial ? (pieces.at(-1) ?? '') : '';
+      const pieces = splitCompleteSentences(pending, !ev.partial);
+      const complete = pieces.complete;
+      pending = pieces.pending;
       for (const sentence of complete) {
         if (!sentence) continue;
         const verdict = input.filter.check(sentence);
@@ -163,12 +201,6 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
           break;
         }
         if (sent.length + sentence.length > maxChars) {
-          const truncated = truncateAtSentence(sent + sentence, input.gradeBand).slice(sent.length);
-          if (truncated) {
-            sent += truncated;
-            firstVisibleTextMs ??= Date.now() - started;
-            yield { type: 'delta', text: truncated };
-          }
           controller.abort();
           break;
         }
@@ -187,6 +219,7 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
     controller.abort();
     if (firstTokenTimer) clearTimeout(firstTokenTimer);
     clearTimeout(turnTimer);
+    releaseModelBudget?.();
     input.signal?.removeEventListener('abort', onAbort);
   }
 
@@ -230,6 +263,18 @@ export async function* runPetTurn(input: TurnInput): AsyncGenerator<TurnChunk, T
     fallback: fallback !== null,
     replyChars: outcome.replyText.length,
   });
-  yield { type: 'done', replyMessageId: outcome.replyMessageId };
+  const retryable =
+    fallback !== null &&
+    !modelToolCallSeen &&
+    toolCalls.length === 0 &&
+    input.actions.length === 0 &&
+    inFlightWrites === 0 &&
+    !persistenceFailed;
+  const done: TurnChunk & { retryable?: boolean } = {
+    type: 'done',
+    replyMessageId: outcome.replyMessageId,
+    ...(retryable ? { retryable: true } : {}),
+  };
+  yield done;
   return outcome;
 }

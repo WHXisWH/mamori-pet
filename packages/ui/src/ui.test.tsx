@@ -2,11 +2,12 @@ import { CHARACTER_IDS, EXPRESSIONS, GRADE_BANDS, MOOD_WEATHERS } from '@ijime/a
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CHARACTER_META, SELECTABLE_CHARACTERS } from './characters/meta.js';
 import { PetAvatar } from './characters/PetAvatar.js';
+import { PET_STATES } from './characters/petArt.js';
 import { RULE_CARD_LINES, RuleCard } from './components/RuleCard.js';
 import { WEATHER_LABELS, WeatherIcon } from './components/WeatherIcon.js';
 import { IslandGround } from './island/IslandGround.js';
@@ -30,32 +31,95 @@ function matchAll(text: string, re: RegExp): string[] {
 }
 
 describe('PetAvatar', () => {
-  it('renders every character in every expression', () => {
+  it('renders every character in every expression and state', () => {
     for (const c of CHARACTER_IDS) {
       for (const e of EXPRESSIONS) {
-        const { container, unmount } = render(<PetAvatar characterId={c} expression={e} />);
-        const svg = container.querySelector('svg')!;
-        expect(svg.getAttribute('data-character')).toBe(c);
-        expect(svg.getAttribute('data-expression')).toBe(e);
-        expect(svg.getAttribute('aria-label')).toContain(CHARACTER_META[c].displayName);
-        unmount();
+        for (const st of PET_STATES) {
+          const { container, unmount } = render(
+            <PetAvatar characterId={c} expression={e} state={st} />,
+          );
+          const svg = container.querySelector('svg')!;
+          expect(svg.getAttribute('data-character')).toBe(c);
+          expect(svg.getAttribute('data-expression')).toBe(e);
+          expect(svg.getAttribute('data-state')).toBe(st);
+          expect(svg.getAttribute('aria-label')).toContain(CHARACTER_META[c].displayName);
+          unmount();
+        }
       }
     }
   });
 
+  it('turns aside while idle and listens while the child types', () => {
+    const idle = render(<PetAvatar characterId="pokke" state="idle" />).container.querySelector(
+      'svg',
+    )!;
+    expect(idle.classList.contains('pa-idle')).toBe(true);
+    expect(idle.getAttribute('aria-label')).toContain('あそんでいる');
+    const listen = render(<PetAvatar characterId="pokke" state="listen" />).container.querySelector(
+      'svg',
+    )!;
+    expect(listen.classList.contains('pa-attend')).toBe(true);
+    expect(listen.classList.contains('pa-listening')).toBe(true);
+  });
+
   it('shows sparkles only when celebrating and zzz only when sleepy', () => {
     const celebrate = render(<PetAvatar characterId="moko" expression="celebrate" />);
-    expect(celebrate.container.querySelectorAll('.pet-sparkle').length).toBeGreaterThan(0);
-    expect(celebrate.container.querySelector('.pet-zzz')).toBeNull();
+    expect(celebrate.container.querySelectorAll('.pa-twinkle').length).toBeGreaterThan(0);
+    expect(celebrate.container.querySelector('.pa-zzz')).toBeNull();
     const sleepy = render(<PetAvatar characterId="pokke" expression="sleepy" />);
-    expect(sleepy.container.querySelector('.pet-zzz')).not.toBeNull();
-    expect(sleepy.container.querySelector('.pet-eye')).toBeNull();
+    expect(sleepy.container.querySelector('.pa-zzz')).not.toBeNull();
+    expect(sleepy.container.querySelector('.pa-twinkle')).toBeNull();
   });
 
   it('can disable animation', () => {
     const { container } = render(<PetAvatar characterId="nami" animate={false} />);
-    expect(container.querySelector('.pet-body')).toBeNull();
-    expect(container.querySelector('.pet-eye')).toBeNull();
+    expect(container.querySelector('svg')!.classList.contains('pa-anim')).toBe(false);
+  });
+
+  it('drops the felt texture at small sizes', () => {
+    const small = render(<PetAvatar characterId="hoshi" size={40} />).container.innerHTML;
+    const big = render(<PetAvatar characterId="hoshi" size={160} />).container.innerHTML;
+    expect(small).not.toMatch(/filter="url\(#[^)]*-felt\)"/);
+    expect(big).toMatch(/filter="url\(#[^)]*-felt\)"/);
+  });
+
+  it('keeps ids unique between avatars on the same page', () => {
+    const { container } = render(
+      <>
+        <PetAvatar characterId="moko" />
+        <PetAvatar characterId="moko" />
+      </>,
+    );
+    const ids = [...container.querySelectorAll('[id]')].map((n) => n.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('smiles when tapped, unless tap reactions are off', () => {
+    const { container } = render(<PetAvatar characterId="togemaru" />);
+    const svg = container.querySelector('svg')!;
+    fireEvent.click(svg);
+    expect(svg.classList.contains('pa-tapped')).toBe(true);
+    expect(svg.classList.contains('pa-joy')).toBe(true);
+    const off = render(
+      <PetAvatar characterId="togemaru" reactToTap={false} />,
+    ).container.querySelector('svg')!;
+    fireEvent.click(off);
+    expect(off.classList.contains('pa-tapped')).toBe(false);
+  });
+
+  it('keeps the shape under the finger in place so a surrounding link or button still gets the tap', () => {
+    const onClick = vi.fn();
+    const { container } = render(
+      <button type="button" onClick={onClick}>
+        <PetAvatar characterId="togemaru" />
+      </button>,
+    );
+    const part = container.querySelector('svg > g')!;
+    fireEvent.pointerDown(part);
+    expect(part.isConnected).toBe(true);
+    fireEvent.click(part);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('svg')!.classList.contains('pa-tapped')).toBe(true);
   });
 });
 
