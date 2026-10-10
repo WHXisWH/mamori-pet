@@ -163,6 +163,13 @@ resource "google_storage_bucket_iam_member" "artworks_api" {
   member = google_service_account.svc["api"].member
 }
 
+# 削除リクエストの消費者が作品の原画を消す（services/risk-engine/src/deletion.ts）
+resource "google_storage_bucket_iam_member" "artworks_risk_engine" {
+  bucket = google_storage_bucket.artworks.name
+  role   = "roles/storage.objectAdmin"
+  member = google_service_account.svc["risk-engine"].member
+}
+
 resource "google_storage_bucket_iam_member" "kb_readers" {
   for_each = local.services
 

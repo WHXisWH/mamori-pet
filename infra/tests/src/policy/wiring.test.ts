@@ -22,8 +22,8 @@ function sourceUnder(dir: string): string {
 }
 const serviceSource = (svc: string) => sourceUnder(join('services', svc));
 
-// サブスクリプションはあるが、サービス側が未実装の push（データ削除の処理は未実装）
-const NOT_YET_IMPLEMENTED = new Set(['data.deletion_requested--api']);
+// サブスクリプションはあるが、サービス側が未実装の push（いまは無し）
+const NOT_YET_IMPLEMENTED = new Set<string>();
 
 const subscriptions = [
   ...tf('locals.tf').matchAll(

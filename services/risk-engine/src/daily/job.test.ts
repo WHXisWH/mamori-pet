@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { addDays } from './calendar.js';
 import { MemoryFeatureStore, type DailyFeatureRow } from './feature-store.js';
+import { MemoryExternalChildData } from '../deletion.js';
 import { runDailyJob, type DailyJobDeps } from './job.js';
 
 const KB_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../kb/v0.1.0');
@@ -102,6 +103,7 @@ function deps() {
     store,
     logger: new Logger('risk-engine', (l) => lines.push(l)),
     notifierUrl: 'http://notifier.test',
+    external: new MemoryExternalChildData(),
     now: () => NOW,
   };
   return { d, lines, publisher, tasks };

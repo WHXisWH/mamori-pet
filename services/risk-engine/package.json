@@ -17,6 +17,7 @@
   "dependencies": {
     "@google-cloud/bigquery": "^9.1.0",
     "@google-cloud/firestore": "^9.2.0",
+    "@google-cloud/storage": "^7.22.0",
     "@ijime/api-types": "workspace:*",
     "@ijime/config": "workspace:*",
     "@ijime/kb-loader": "workspace:*",

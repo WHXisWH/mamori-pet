@@ -175,7 +175,9 @@ flowchart TD
 | requestedAt | timestamp | はい | リクエストした時刻 |
 | firestoreClearedAt | timestamp | いいえ | オンラインのサブコレクションと通知の削除に成功した時刻。失敗時のリトライは未完了のステップから続ける |
 | deletionEventPublishedAt | timestamp | いいえ | 削除イベントの発行に成功した時刻。外部ストレージの削除が済んだことは意味しない。発行後の記録に失敗した場合や並行するリクエストでは重複して発行されることがあるため、消費側は冪等でなければならない |
-| completedAt | timestamp | いいえ | 完了した時刻 |
+| completedAt | timestamp | いいえ | 完了した時刻。risk-engine が data.deletion\_requested を消費し、作品バケットと BigQuery の特徴を消した後に書く |
+| artworksDeleted | number | いいえ | 作品バケットから削除したオブジェクト数 |
+| featuresPurged | boolean | いいえ | 仮名で BigQuery の特徴行を削除したか |
 
 ### jobRuns/:runId（ルートコレクション）
 

@@ -75,7 +75,8 @@ locals {
     "crisis.detected--notifier"       = { topic = "crisis.detected", subscriber = "notifier", path = "/internal/events/crisis-detected" }
     "crisis.detected--risk-engine"    = { topic = "crisis.detected", subscriber = "risk-engine", path = "/internal/events/crisis-detected" }
     "consultation.resolved--notifier" = { topic = "consultation.resolved", subscriber = "notifier", path = "/internal/events/consultation-resolved" }
-    "data.deletion_requested--api"    = { topic = "data.deletion_requested", subscriber = "api", path = "/internal/events/data-deletion-requested" }
+    # 削除リクエストの外部データ（作品バケット、BigQuery の特徴）は risk-engine が消す：内部イングレスで BigQuery 権限も持つ
+    "data.deletion_requested--risk-engine" = { topic = "data.deletion_requested", subscriber = "risk-engine", path = "/internal/events/data-deletion-requested" }
   }
 
   key_access = jsondecode(file("${path.module}/policy/key_access.json"))
@@ -132,6 +133,7 @@ locals {
       NOTIFIER_URL     = local.service_urls["notifier"]
       TASKS_INVOKER_SA = google_service_account.tasks.email
       BIGQUERY_DATASET = google_bigquery_dataset.features_deid.dataset_id
+      ARTWORKS_BUCKET  = google_storage_bucket.artworks.name
     }
     notifier = {
       SELF_URL            = local.service_urls["notifier"]

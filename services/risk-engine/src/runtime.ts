@@ -12,7 +12,9 @@ import {
   PubSubRestPublisher,
 } from '@ijime/service-kit';
 
+import { MemoryExternalChildData, type ExternalChildData } from './deletion.js';
 import type { RiskEngineDeps } from './deps.js';
+import { CloudExternalChildData } from './external-data.js';
 
 function required(name: string): string {
   const v = process.env[name];
@@ -51,6 +53,29 @@ export async function createRuntime(
         : new MemoryTaskQueue()),
     logger: overrides.logger ?? new Logger('risk-engine'),
     notifierUrl,
+    external: overrides.external ?? (await externalChildData(env, prod)),
     now: overrides.now ?? (() => new Date()),
   };
+}
+
+// 本番では作品バケットと BigQuery を消す。ローカルとテストはメモリ実装
+async function externalChildData(
+  env: ReturnType<typeof loadEnv>,
+  prod: boolean,
+): Promise<ExternalChildData> {
+  if (!prod) return new MemoryExternalChildData();
+  const [{ Storage }, { BigQuery }] = await Promise.all([
+    import('@google-cloud/storage'),
+    import('@google-cloud/bigquery'),
+  ]);
+  const projectId = env.GCP_PROJECT_ID!;
+  return new CloudExternalChildData(
+    new Storage().bucket(required('ARTWORKS_BUCKET')),
+    new BigQuery({ projectId, location: env.GCP_REGION }),
+    {
+      projectId,
+      dataset: process.env['BIGQUERY_DATASET'] ?? 'features_deid',
+      location: env.GCP_REGION,
+    },
+  );
 }

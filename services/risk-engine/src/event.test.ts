@@ -8,6 +8,7 @@ import { encodePushEnvelope, Logger, MemoryPublisher, MemoryTaskQueue } from '@i
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from './app.js';
+import { MemoryExternalChildData } from './deletion.js';
 import { explicitL3 } from './levels.js';
 
 const KB_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../kb/v0.1.0');
@@ -63,6 +64,7 @@ function setup() {
       tasks,
       logger,
       notifierUrl: 'http://notifier.test',
+      external: new MemoryExternalChildData(),
       now: () => NOW,
     }),
     logger,
