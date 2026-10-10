@@ -5,6 +5,9 @@ import { useEffect } from 'react';
 
 import { prefersReducedMotion, viewProgress } from './motion';
 
+// Height of the fixed site header plus breathing room, so anchored sections start below it.
+const ANCHOR_OFFSET_PX = 88;
+
 export function CinemaRuntime() {
   useEffect(() => {
     const root = document.documentElement;
@@ -13,7 +16,13 @@ export function CinemaRuntime() {
 
     let lenis: Lenis | null = null;
     if (!reduced) {
-      lenis = new Lenis({ autoRaf: true, anchors: true, lerp: 0.085, smoothWheel: true });
+      // anchors: land sections below the fixed header; lerp: a little quicker so the wheel feels direct
+      lenis = new Lenis({
+        autoRaf: true,
+        anchors: { offset: -ANCHOR_OFFSET_PX },
+        lerp: 0.11,
+        smoothWheel: true,
+      });
     }
 
     let targetX = 0;
@@ -23,8 +32,24 @@ export function CinemaRuntime() {
     let dirty = true;
     let frame = 0;
 
-    const tracked = () => Array.from(document.querySelectorAll<HTMLElement>('[data-scroll]'));
-    let elements = tracked();
+    // Only elements within two viewports of the screen get measured each frame.
+    const nearby = new Set<HTMLElement>();
+    const near = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) nearby.add(e.target as HTMLElement);
+          else nearby.delete(e.target as HTMLElement);
+        }
+        dirty = true;
+      },
+      { rootMargin: '100% 0px 100% 0px' },
+    );
+    const tracked = () => {
+      near.disconnect();
+      nearby.clear();
+      for (const el of document.querySelectorAll<HTMLElement>('[data-scroll]')) near.observe(el);
+    };
+    tracked();
 
     const onPointer = (e: PointerEvent) => {
       if (e.pointerType !== 'mouse') return;
@@ -36,7 +61,7 @@ export function CinemaRuntime() {
       dirty = true;
     };
     const onResize = () => {
-      elements = tracked();
+      tracked();
       dirty = true;
     };
 
@@ -54,9 +79,8 @@ export function CinemaRuntime() {
       dirty = false;
       const vh = window.innerHeight;
       root.dataset['scrolled'] = window.scrollY > 40 ? 'true' : 'false';
-      for (const el of elements) {
+      for (const el of nearby) {
         const rect = el.getBoundingClientRect();
-        if (rect.bottom < -vh || rect.top > vh * 2) continue;
         el.style.setProperty('--p', reduced ? '0.5' : viewProgress(rect, vh).toFixed(4));
       }
     };
@@ -84,6 +108,7 @@ export function CinemaRuntime() {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
       mo.disconnect();
+      near.disconnect();
       watcher.disconnect();
       lenis?.destroy();
     };
