@@ -148,8 +148,11 @@ export function assess(input: AssessInput): AssessOutput {
     if (days > 0) persistenceDays[domain] = days;
   }
 
-  // 重みの低い領域は、重みの低くない領域と同時に出たときだけ数える
-  const withLowRule = (ds: readonly Domain[]) => (ds.every((d) => low.has(d)) ? [] : [...ds]);
+  // 重みの低い領域は係数を掛けて領域数に数える。重みの低い領域しかないときは 0 とし、単独ではどのレベルも発火させない
+  const domainCount = (ds: readonly Domain[]) =>
+    ds.every((d) => low.has(d))
+      ? 0
+      : ds.reduce((sum, d) => sum + (low.has(d) ? rules.low_weight_factor : 1), 0);
 
   const result = (
     level: AssessOutput['level'],
@@ -170,24 +173,25 @@ export function assess(input: AssessInput): AssessOutput {
     };
   };
 
-  const l3 = rules.levels.l3;
+  // 順序は固定：明確な発言 → コールドスタート → 当日の複数領域 → 継続日数（docs/02-agent-architecture.md「リスクエンジンと相談ステートマシン」の第 5 ステップ）
   if (input.explicitDomains.length > 0) {
     return result('l3', input.explicitDomains, { days: 1, explicit: true });
   }
+  if (input.inColdStart) return result('l0', []);
+
+  const l3 = rules.levels.l3;
   const today = statusOn(date);
-  const todayDeviated = withLowRule(domains.filter((d) => today.get(d) === 'deviated'));
+  const todayDeviated = domains.filter((d) => !low.has(d) && today.get(d) === 'deviated');
   const todayWeight = todayDeviated.reduce((sum, d) => sum + weight(date, d), 0);
   if (l3.min_domains !== undefined && todayWeight >= l3.min_domains) {
     return result('l3', todayDeviated);
   }
 
-  if (input.inColdStart) return result('l0', []);
-
   const persistentFor = (minDays: number | undefined) =>
-    withLowRule(domains.filter((d) => (persistenceDays[d] ?? 0) >= (minDays ?? 1)));
+    domains.filter((d) => (persistenceDays[d] ?? 0) >= (minDays ?? 1));
   const { l1, l2 } = rules.levels;
   const l2Domains = persistentFor(l2.min_days);
-  if (l2Domains.length >= (l2.min_domains ?? Infinity)) return result('l2', l2Domains);
+  if (domainCount(l2Domains) >= (l2.min_domains ?? Infinity)) return result('l2', l2Domains);
 
   const sa = daily.school_avoidance;
   let avoidDays = 0;
@@ -200,6 +204,6 @@ export function assess(input: AssessInput): AssessOutput {
   }
 
   const l1Domains = persistentFor(l1.min_days);
-  if (l1Domains.length >= (l1.min_domains ?? Infinity)) return result('l1', l1Domains);
+  if (domainCount(l1Domains) >= (l1.min_domains ?? Infinity)) return result('l1', l1Domains);
   return result('l0', []);
 }

@@ -17,9 +17,10 @@ import { MemoryDailyFeatures } from './weekly-source.js';
 
 const SUMMARY = 'PRIVATE_SUMMARY_SENTINEL';
 const GOOD = {
-  title: 'Recent days',
-  changes: ['A change in routine'],
-  meaning: 'Make time to listen',
+  title: 'Testさんからの相談',
+  changes: [],
+  meaning:
+    'お子さんが共有に同意した内容をお届けします。出来事を第三者が確認したものではありません。まずは落ち着いてお話を聞いてみてください。',
   suggestions: {
     try: ['Spend time together', 'Listen without interrupting'],
     avoid: ['Interrogating'],
@@ -162,6 +163,31 @@ describe('authoritative guardian routing', () => {
       await w.assertRedacted();
     },
   );
+
+  it('keeps suppressing the proxy for 24 hours after the child acknowledges family harm', async () => {
+    const w = await world();
+    await w.crisis.set({
+      status: 'child_acknowledged',
+      familyHarmSuspected: true,
+      createdAt: new Date(Date.now() - 2 * 86_400_000),
+      timeline: [{ step: 'child_acknowledged', at: new Date(Date.now() - 1 * 3_600_000) }],
+    });
+    expect((await w.proxy()).status).toBe(204);
+    await w.assertRedacted();
+    expect(w.llm.requests).toHaveLength(0);
+  });
+
+  it('routes the proxy again once a family-harm acknowledgement is 24 hours old', async () => {
+    const w = await world();
+    await w.crisis.set({
+      status: 'guardian_acknowledged',
+      familyHarmSuspected: true,
+      timeline: [{ step: 'guardian_acknowledged', at: new Date(Date.now() - 25 * 3_600_000) }],
+    });
+    expect((await w.proxy()).status).toBe(204);
+    expect(w.llm.requests).toHaveLength(1);
+    expect(w.tasks.tasks).toHaveLength(1);
+  });
 
   it.each([true, false])(
     'redacts queued-before-delete events (consultation retained: %s)',

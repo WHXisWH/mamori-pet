@@ -107,11 +107,11 @@ export function attachVoiceServer(
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
         ws.close(1000);
     };
-    const fail = () => {
-      send({ type: 'end', reason: 'error' });
+    const fail = (reason: 'error' | 'limit' | 'unavailable' = 'error') => {
+      send({ type: 'end', reason });
       closeSocket();
     };
-    const startTimer = setTimeout(fail, START_TIMEOUT_MS);
+    const startTimer = setTimeout(() => fail(), START_TIMEOUT_MS);
     startTimer.unref();
 
     ws.on('message', (data, isBinary) => {
@@ -171,7 +171,14 @@ export function attachVoiceServer(
                     ? 'live_connect'
                     : 'internal',
           });
-          fail();
+          const refused = err instanceof VoiceOpenError ? err.reason : undefined;
+          fail(
+            refused === 'daily_limit'
+              ? 'limit'
+              : refused === 'voice_disabled'
+                ? 'unavailable'
+                : 'error',
+          );
         },
       );
     });

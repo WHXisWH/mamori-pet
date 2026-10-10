@@ -10,7 +10,8 @@ import {
   ScriptedLlm,
   type Script,
 } from '@ijime/agent-core';
-import { FsKbSource, Kb } from '@ijime/kb-loader';
+import { createNoModelDetector } from '@ijime/crisis-detector';
+import { FsKbSource, Kb, lexiconSchema } from '@ijime/kb-loader';
 import { encodePushEnvelope, Logger, MemoryPublisher } from '@ijime/service-kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -63,6 +64,7 @@ function setup(script: Script = () => ({ text: EXTRACTED })) {
       publisher,
       model: llm,
       artworkModel: llm,
+      detector: createNoModelDetector(await kb.yaml('lexicon/ja.yaml', lexiconSchema)),
       logger,
       now: () => new Date(),
     }),

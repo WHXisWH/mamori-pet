@@ -9,7 +9,8 @@ import {
   type Script,
 } from '@ijime/agent-core';
 import { fieldAad } from '@ijime/crypto';
-import { FsKbSource, Kb, type SignalDefinition } from '@ijime/kb-loader';
+import { createNoModelDetector } from '@ijime/crisis-detector';
+import { FsKbSource, Kb, lexiconSchema, type SignalDefinition } from '@ijime/kb-loader';
 import { encodePushEnvelope, Logger, MemoryPublisher } from '@ijime/service-kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -53,6 +54,7 @@ function setup(artworkScript: Script) {
       publisher,
       model: flash,
       artworkModel: artworkLlm,
+      detector: createNoModelDetector(await kb.yaml('lexicon/ja.yaml', lexiconSchema)),
       logger,
       now: () => new Date(),
     }),

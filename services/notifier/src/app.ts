@@ -7,6 +7,7 @@ import {
   type ServiceApp,
 } from '@ijime/service-kit';
 
+import { BUDGET_ALERT_PATH, budgetAlertSchema, handleBudgetAlert } from './budget.js';
 import {
   CONSULTATION_TIMEOUT_PATH,
   consultationTimeoutSchema,
@@ -58,6 +59,9 @@ export function createApp(getDeps?: () => Promise<NotifierDeps>, logger?: Logger
   );
   registerTaskHandler(app, WEEKLY_REPORT_PATH, weeklyJobSchema, async (job) =>
     runWeeklyReport(await deps(), job),
+  );
+  registerPushHandler(app, BUDGET_ALERT_PATH, budgetAlertSchema, async (alert) =>
+    handleBudgetAlert(await deps(), alert),
   );
   return app;
 }

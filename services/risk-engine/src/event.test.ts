@@ -161,6 +161,19 @@ describe('event mode: explicit statement → L3 and one consultation', () => {
     expect(t.publisher.published).toEqual([]);
   });
 
+  it('ignores explicit signals marked observe (stored field or current kb)', async () => {
+    const [f, c] = ['f_re_obs', 'c_re_obs'];
+    await seedChild(f, c);
+    await seedSignal(f, c, 's1', 'a', true);
+    await db.doc(`families/${f}/children/${c}/signals/s1`).update({ scoring: 'observe' });
+    await seedSignal(f, c, 's2', 'd', true);
+    await db.doc(`families/${f}/children/${c}/signals/s2`).update({ signalDefId: 'D-STORY-001' });
+    const t = setup();
+    await t.push('/internal/assess', { childId: c, domains: ['a', 'd'], explicit: true });
+    expect((await read(`families/${f}/children/${c}`))!['currentRiskLevel']).toBe('l0');
+    expect(await list(`families/${f}/children/${c}/riskAssessments`)).toHaveLength(0);
+  });
+
   it('reuses an open L2 consultation instead of opening a second one', async () => {
     const [f, c] = ['f_re3', 'c_re3'];
     await seedChild(f, c, 'l2');

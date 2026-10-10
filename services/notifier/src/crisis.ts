@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { enqueueSends } from './delivery.js';
 import { loadResources, loadTemplate, templateId, type NotifierDeps } from './deps.js';
-import { planDeliveries, channelsOf } from './recipients.js';
+import { channelsOf, firstCrisisRecipients, planDeliveries } from './recipients.js';
 import { readRoutingBlock, redactNotification } from './routing-safety.js';
 import {
   appendCrisisTimeline,
@@ -16,7 +16,7 @@ import {
   type NotificationDoc,
   type NotificationPayload,
 } from './store.js';
-import { fillTemplate } from './templates.js';
+import { fillTemplate, TemplateError } from './templates.js';
 
 export const ESCALATION_TASK_PATH = '/internal/tasks/crisis-escalation';
 
@@ -30,6 +30,11 @@ export const escalationTaskSchema = z.strictObject({
 });
 export type EscalationTask = z.infer<typeof escalationTaskSchema>;
 
+// family_harm のときだけ保護者に通知しない。category を持たない古いイベントや記録は familyHarmSuspected で判断する
+function isFamilyHarm(r: { category?: unknown; familyHarmSuspected?: unknown }): boolean {
+  return r.category === 'family_harm' || r.familyHarmSuspected === true;
+}
+
 export function crisisNotificationId(childId: string, crisisId: string): string {
   return `crisis-${stableId(childId, crisisId)}`;
 }
@@ -37,12 +42,15 @@ export function crisisNotificationId(childId: string, crisisId: string): string 
 export async function buildCrisisPayload(
   deps: Pick<NotifierDeps, 'kb'>,
   nickname: string,
+  opts: { delayed?: boolean } = {},
 ): Promise<NotificationPayload> {
   const t = fillTemplate(await loadTemplate(deps.kb, 'crisis'), { nickname });
+  const delayedLine = t.labeled['検知遅延'];
+  if (opts.delayed && !delayedLine) throw new TemplateError('crisis template has no delay line');
   return {
     title: t.title,
     changes: [],
-    meaning: t.paragraphs.join('\n'),
+    meaning: [...(opts.delayed ? [delayedLine!] : []), ...t.paragraphs].join('\n'),
     suggestions: { try: t.bullets, avoid: [] },
     childSummary: null,
     resources: await loadResources(deps.kb, t.resourceIds),
@@ -67,7 +75,7 @@ export async function handleCrisisDetected(
   ev: EventPayload<'crisis.detected'>,
 ): Promise<void> {
   const { db, logger } = deps;
-  if (ev.familyHarmSuspected) {
+  if (isFamilyHarm(ev)) {
     logger.info('crisis.guardian_notify_suppressed', { crisisId: ev.crisisId });
     return;
   }
@@ -75,12 +83,12 @@ export async function handleCrisisDetected(
   if (!child) throw new SkipEvent('child_not_found');
   const crisisSnap = await db.doc(crisisPath(child.familyId, ev.childId, ev.crisisId)).get();
   if (!crisisSnap.exists) throw new Error('crisis event not visible yet');
-  if ((crisisSnap.data() as { familyHarmSuspected?: boolean }).familyHarmSuspected) {
+  if (isFamilyHarm(crisisSnap.data()!)) {
     logger.info('crisis.guardian_notify_suppressed', { crisisId: ev.crisisId });
     return;
   }
 
-  const guardians = await listGuardians(db, child.familyId);
+  const guardians = firstCrisisRecipients(await listGuardians(db, child.familyId));
   const deliveries = planDeliveries('crisis', guardians);
   const notificationId = crisisNotificationId(ev.childId, ev.crisisId);
   const now = deps.now();
@@ -90,7 +98,9 @@ export async function handleCrisisDetected(
     kind: 'crisis',
     level: 'l4',
     templateId: templateId(deps.kb, 'crisis'),
-    payload: await buildCrisisPayload(deps, child.nickname),
+    payload: await buildCrisisPayload(deps, child.nickname, {
+      delayed: ev.delayed === true || crisisSnap.get('detection.delayed') === true,
+    }),
     channels: channelsOf(deliveries),
     status: 'queued',
     attempts: [],
@@ -145,7 +155,7 @@ export async function handleEscalation(deps: NotifierDeps, task: EscalationTask)
     });
     return;
   }
-  // 保護者を読み直す。その間に新しく登録された保護者とデバイスにも届くようにする
+  // 再送時は全保護者（第二保護者を含む）に通知する。読み直すことで、その間に新しく登録された保護者とデバイスにも届く
   const guardians = await listGuardians(db, task.familyId);
   const deliveries = planDeliveries('crisis', guardians);
   const refreshed = await db.runTransaction(async (tx) => {

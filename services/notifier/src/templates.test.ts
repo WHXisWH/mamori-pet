@@ -6,8 +6,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { buildCrisisPayload } from './crisis.js';
 import { loadTemplate } from './deps.js';
-import { channelsOf, planDeliveries, type GuardianContact } from './recipients.js';
-import { fill, fillTemplate, parseTemplate, TemplateError } from './templates.js';
+import {
+  channelsOf,
+  firstCrisisRecipients,
+  planDeliveries,
+  type GuardianContact,
+} from './recipients.js';
+import { emailOf, fill, fillTemplate, parseTemplate, TemplateError } from './templates.js';
 
 const KB_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../kb/v0.1.0');
 let kb: Kb;
@@ -39,6 +44,16 @@ describe('templates', () => {
     });
   });
 
+  it('prepends the fixed delay line only for a crisis found on recheck', async () => {
+    const p = await buildCrisisPayload({ kb }, 'はな', { delayed: true });
+    expect(p.meaning).toBe(
+      [
+        'システムの一時的な不具合のため、このお知らせは少し遅れて届いています。',
+        'このサービスは緊急通報サービスではなく、人による見守りは行っていません。',
+      ].join('\n'),
+    );
+  });
+
   it('keeps push copy fixed and free of the nickname', async () => {
     const t = fillTemplate(await loadTemplate(kb, 'crisis'), { nickname: 'はな' });
     expect(t.pushTitle).toBe('緊急：お子さんの安全に関するお知らせ');
@@ -48,10 +63,12 @@ describe('templates', () => {
 
   it('parses labeled lines of the care hint fallback', async () => {
     const t = fillTemplate(await loadTemplate(kb, 'care_hint'), { nickname: 'はな', days: 7 });
-    expect(t.title).toBe('最近、はなさんに少し元気のない日が続いています');
-    expect(t.labeled['声かけの例']).toBe('「最近どう？なんでも聞くよ」');
+    expect(t.title).toBe('はなさんからの相談');
+    expect(t.labeled['声かけの例']).toBe(
+      '「話したいときに聞くよ」と声をかける、落ち着いて話せる時間を一緒に決める',
+    );
     expect(t.labeled['避けたいこと']).toBe('問い詰める、すぐに学校へ電話する');
-    expect(t.paragraphs[0]).toBe('この7日ほど、いつもと少し違う様子が見られました。');
+    expect(t.paragraphs[0]).toBe('記録上、この7日ほど、いつもと違う傾向が見られました。');
   });
 
   it('refuses unfilled variables and templates without a title', () => {
@@ -99,5 +116,44 @@ describe('planDeliveries', () => {
   it('keeps a guardian with no reachable channel so the gap is visible', () => {
     const none: GuardianContact = { guardianId: 'g3', notifyChannels: [], fcmTokens: [] };
     expect(planDeliveries('crisis', [none])).toEqual([{ guardianId: 'g3', channels: [] }]);
+  });
+});
+
+describe('emailOf', () => {
+  it('uses the crisis email lines and the link, with no child content', async () => {
+    const t = fillTemplate(await loadTemplate(kb, 'crisis'), { nickname: 'はな' });
+    const email = emailOf(t, 'https://g.example/notifications/n1');
+    expect(email.subject).toBe('【緊急】お子さんの安全に関するお知らせ');
+    expect(email.body.split('\n\n')).toEqual([
+      t.labeled['メール本文'],
+      'https://g.example/notifications/n1',
+      t.labeled['メール末尾'],
+    ]);
+    expect(JSON.stringify(email)).not.toContain('はな');
+  });
+
+  it('falls back to the push text for templates without email lines', () => {
+    const t = parseTemplate('プッシュ通知タイトル：T\nプッシュ通知本文：B\n**title**');
+    expect(emailOf(t)).toEqual({ subject: 'T', body: 'B' });
+  });
+});
+
+describe('firstCrisisRecipients', () => {
+  const g = (guardianId: string, role?: 'primary' | 'secondary'): GuardianContact => ({
+    guardianId,
+    ...(role ? { role } : {}),
+    notifyChannels: [],
+    fcmTokens: [],
+  });
+
+  it('keeps only the primary guardian', () => {
+    expect(firstCrisisRecipients([g('a', 'secondary'), g('b', 'primary')])).toEqual([
+      g('b', 'primary'),
+    ]);
+  });
+
+  it('notifies everyone when no guardian is marked primary', () => {
+    expect(firstCrisisRecipients([g('a', 'secondary'), g('b')])).toHaveLength(2);
+    expect(firstCrisisRecipients([])).toEqual([]);
   });
 });

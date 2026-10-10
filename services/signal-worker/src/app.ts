@@ -1,5 +1,8 @@
+import { withChildScope } from '@ijime/agent-core';
 import {
+  CRISIS_RECHECK_PATH,
   createServiceApp,
+  crisisRecheckTaskSchema,
   eventSchemas,
   registerPushHandler,
   registerTaskHandler,
@@ -16,6 +19,7 @@ import {
 import { handleCheckinCreated } from './checkins.js';
 import type { SignalWorkerDeps } from './deps.js';
 import { handleMessageCreated } from './message.js';
+import { handleCrisisRecheck } from './recheck.js';
 
 export const SERVICE_NAME = 'signal-worker';
 
@@ -25,6 +29,7 @@ export function createApp(getDeps?: () => Promise<SignalWorkerDeps>, logger?: Lo
     version: process.env['SERVICE_VERSION'] ?? '0.1.0',
     ...(logger ? { logger } : {}),
   });
+  app.use('*', (_c, next) => withChildScope(next));
   if (!getDeps) return app;
   let ready: Promise<SignalWorkerDeps> | undefined;
   const deps = () => (ready ??= getDeps());
@@ -49,6 +54,9 @@ export function createApp(getDeps?: () => Promise<SignalWorkerDeps>, logger?: Lo
   );
   registerTaskHandler(app, ARTWORK_FEATURES_PATH, artworkFeaturesSchema, async (req) =>
     handleArtworkFeatures(await deps(), req),
+  );
+  registerTaskHandler(app, CRISIS_RECHECK_PATH, crisisRecheckTaskSchema, async (task) =>
+    handleCrisisRecheck(await deps(), task),
   );
   return app;
 }

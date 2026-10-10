@@ -1,10 +1,15 @@
 import { createHash } from 'node:crypto';
 
 import type { Firestore } from '@google-cloud/firestore';
-import { childPath, type FirestoreSessionService } from '@ijime/agent-core';
-import type { CrisisReason } from '@ijime/api-types';
-import { agent, retention } from '@ijime/config';
-import { crisisEventDoc, type CrisisCheck } from '@ijime/crisis-detector';
+import { addVoiceSeconds, childPath, type FirestoreSessionService } from '@ijime/agent-core';
+import type { CrisisHitCategory } from '@ijime/api-types';
+import { agent, isCrisisLockingChild, retention } from '@ijime/config';
+import {
+  crisisEventDoc,
+  isPaused,
+  type CrisisCheck,
+  type CrisisRouting,
+} from '@ijime/crisis-detector';
 
 import type { UtteranceFeatures } from './features.js';
 
@@ -19,9 +24,11 @@ export interface VoiceStore {
   recordCrisis(
     input:
       | { messageId: string; check: CrisisCheck }
-      | { agentReason: CrisisReason; familyHarmSuspected: boolean },
+      | { agentCategory: CrisisHitCategory; routing: CrisisRouting },
   ): Promise<string>;
   markSafeMode(): Promise<void>;
+  // このセッションの時間を当日の音声利用分数に加算する
+  recordVoiceSeconds(seconds: number): Promise<void>;
   end(): Promise<void>;
 }
 
@@ -58,7 +65,7 @@ export class FirestoreVoiceStore implements VoiceStore {
         current.get('endedAt') ||
         current.get('channel') !== 'voice' ||
         current.get('safeMode') === true ||
-        crises.docs.some((crisis) => crisis.get('status') !== 'closed')
+        crises.docs.some((crisis) => isCrisisLockingChild(crisis.data(), new Date()))
       )
         return false;
       if (previous.exists) return previous.get('result') === true;
@@ -91,6 +98,7 @@ export class FirestoreVoiceStore implements VoiceStore {
           method: check.method,
           score: check.confidence,
           checkedAt: this.now(),
+          ...(isPaused(check) ? { pendingReview: true } : {}),
         },
       },
     );
@@ -118,7 +126,7 @@ export class FirestoreVoiceStore implements VoiceStore {
   async recordCrisis(
     input:
       | { messageId: string; check: CrisisCheck }
-      | { agentReason: CrisisReason; familyHarmSuspected: boolean },
+      | { agentCategory: CrisisHitCategory; routing: CrisisRouting },
   ): Promise<string> {
     const now = this.now();
     const session = `${this.base}/sessions/${this.sessionId}`;
@@ -133,8 +141,8 @@ export class FirestoreVoiceStore implements VoiceStore {
         : {
             triggerType: 'voice',
             sourceRef: session,
-            detection: { source: 'agent_tool', reason: input.agentReason },
-            familyHarmSuspected: input.familyHarmSuspected,
+            detection: { source: 'agent_tool', category: input.agentCategory },
+            ...input.routing,
             timeline: [{ step: 'safe_mode_shown', at: now }],
             status: 'open',
             createdAt: now,
@@ -144,6 +152,10 @@ export class FirestoreVoiceStore implements VoiceStore {
 
   markSafeMode(): Promise<void> {
     return this.sessions.markSafeMode(this.child.childId, this.sessionId);
+  }
+
+  recordVoiceSeconds(seconds: number): Promise<void> {
+    return addVoiceSeconds(this.db, this.child, this.now(), seconds);
   }
 
   end(): Promise<void> {

@@ -1,9 +1,10 @@
 import { Writable } from 'node:stream';
 
 import type { BigQuery } from '@google-cloud/bigquery';
+import { batch } from '@ijime/config';
 import { describe, expect, it } from 'vitest';
 
-import { BigQueryFeatureStore } from './feature-store.js';
+import { BigQueryFeatureStore, MemoryFeatureStore, retryBigQuery } from './feature-store.js';
 
 type Call = { kind: string; args: unknown };
 
@@ -98,6 +99,40 @@ describe('BigQueryFeatureStore', () => {
     expect(args.params.ids).toEqual(["p1' OR 1=1 --"]);
   });
 
+  it('a shard deletes only its own rows, then appends', async () => {
+    const { bq, calls } = fakeBigQuery();
+    const row = {
+      pseudo_id: 'p1',
+      date: '2026-11-20',
+      level: 'l1',
+      domains_flagged: [],
+      rules_version: '0.1.0',
+    };
+    await new BigQueryFeatureStore(bq, OPTS).replaceRows(
+      'risk_levels_daily',
+      '2026-11-20',
+      ['p1', 'p2'],
+      [row],
+    );
+    expect(calls[0]).toMatchObject({
+      kind: 'query',
+      args: {
+        params: { d: '2026-11-20', ids: ['p1', 'p2'] },
+        types: { d: 'DATE', ids: ['STRING'] },
+      },
+    });
+    expect((calls[0]!.args as { query: string }).query).toMatch(
+      /WHERE date = @d AND pseudo_id IN UNNEST\(@ids\)/,
+    );
+    expect(calls[1]).toMatchObject({
+      kind: 'load',
+      args: {
+        table: 'features_deid.risk_levels_daily$20261120',
+        opts: { writeDisposition: 'WRITE_APPEND' },
+      },
+    });
+  });
+
   it('retrains weekly and writes anomalies into the day partition', async () => {
     const { bq, calls } = fakeBigQuery();
     await new BigQueryFeatureStore(bq, OPTS).refreshAnomalies('2026-11-22', {
@@ -114,5 +149,67 @@ describe('BigQueryFeatureStore', () => {
     expect(job.query).toContain('ML.DETECT_ANOMALIES');
     expect(job.writeDisposition).toBe('WRITE_TRUNCATE');
     expect(job.destination.id).toBe('features_deid.anomalies$20261122');
+  });
+});
+
+describe('MemoryFeatureStore.replaceRows', () => {
+  it('keeps rows written by other shards', async () => {
+    const store = new MemoryFeatureStore();
+    const row = (pseudo_id: string, level: string) => ({
+      pseudo_id,
+      date: '2026-11-20',
+      level,
+      domains_flagged: [],
+      rules_version: '0.1.0',
+    });
+    await store.replaceRows('risk_levels_daily', '2026-11-20', ['a'], [row('a', 'l0')]);
+    await store.replaceRows('risk_levels_daily', '2026-11-20', ['b'], [row('b', 'l1')]);
+    await store.replaceRows('risk_levels_daily', '2026-11-20', ['a'], [row('a', 'l2')]);
+    expect(store.rows('risk_levels_daily', '2026-11-20')).toEqual([row('b', 'l1'), row('a', 'l2')]);
+  });
+});
+
+describe('retryBigQuery', () => {
+  const conflict = () => new Error('Could not serialize access to table due to concurrent update');
+
+  it('backs off on concurrent-update conflicts and succeeds', async () => {
+    const waits: number[] = [];
+    let n = 0;
+    const out = await retryBigQuery(
+      async () => {
+        if (++n < 3) throw conflict();
+        return 'ok';
+      },
+      async (ms) => void waits.push(ms),
+      () => 0,
+    );
+    expect(out).toBe('ok');
+    expect(waits).toEqual([batch.bigQueryRetryBaseMs, batch.bigQueryRetryBaseMs * 2]);
+  });
+
+  it('does not retry other errors and gives up after the attempt limit', async () => {
+    let n = 0;
+    await expect(
+      retryBigQuery(
+        async () => {
+          n++;
+          throw new Error('Syntax error');
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow('Syntax error');
+    expect(n).toBe(1);
+
+    n = 0;
+    await expect(
+      retryBigQuery(
+        async () => {
+          n++;
+          throw conflict();
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow('concurrent update');
+    expect(n).toBe(batch.bigQueryWriteAttempts);
   });
 });

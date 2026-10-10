@@ -293,7 +293,11 @@ describe('S7 voice crisis', () => {
     const types = c.messages.map((m) => m.type);
     expect(types).toEqual(['ready', 'child_transcript', 'child_transcript', 'crisis', 'end']);
     const crisis = c.messages[3] as Extract<VoiceServerMessage, { type: 'crisis' }>;
-    expect(crisis.resources.map((r) => r.id).sort()).toEqual(['childline', 'sos_dial']);
+    expect(crisis.resources.map((r) => r.id).sort()).toEqual([
+      'childline',
+      'emergency',
+      'sos_dial',
+    ]);
     expect(c.messages[4]).toEqual({ type: 'end', reason: 'crisis' });
     await until(() => conn.closed);
 
@@ -331,7 +335,12 @@ describe('S7 voice crisis', () => {
       channel: 'voice',
     });
     const detected = eventsFor(childId).find((p) => p.topic === 'crisis.detected')!;
-    expect(detected.payload).toEqual({ childId, crisisId: k.id, familyHarmSuspected: false });
+    expect(detected.payload).toEqual({
+      childId,
+      crisisId: k.id,
+      category: 'other',
+      familyHarmSuspected: false,
+    });
 
     // S1 と同じ：notifier は crisis.detected を受け取ると、保護者あての crisis 通知を登録して送信する
     const nlogs: string[] = [];

@@ -1,4 +1,4 @@
-import type { Firestore, Timestamp } from '@google-cloud/firestore';
+import { FieldValue, type Firestore, type Timestamp } from '@google-cloud/firestore';
 import type { ContextCategory, Domain, GradeBand, RiskLevel } from '@ijime/api-types';
 import {
   featuresSchema,
@@ -7,15 +7,24 @@ import {
   type FeatureDefinition,
   type RiskRules,
 } from '@ijime/kb-loader';
-import { stableId } from '@ijime/service-kit';
+import { ACTIVE_CRISIS_STATUSES, batch, isCrisisActive } from '@ijime/config';
+import { inShard, stableId, type Shard } from '@ijime/service-kit';
 
 import type { RiskEngineDeps } from '../deps.js';
 import { RULES_PATH, respond } from '../event.js';
 import { explicitL3, isHigher } from '../levels.js';
+import { isScoredSignal, loadSignalDefs, scoringOf, type Scoring } from '../scoring.js';
 import { childDocPath, commitAssessment, type ChildState } from '../store.js';
 import { assess, type AssessOutput, type History } from './assess.js';
 import { addDays, contextsOn, type ContextSpan } from './calendar.js';
-import type { DailyFeatureRow, FeatureStore, RiskLevelRow, BaselineRow } from './feature-store.js';
+import type {
+  BaselineRow,
+  DailyFeatureRow,
+  FeatureStore,
+  PartitionedTable,
+  PartitionRows,
+  RiskLevelRow,
+} from './feature-store.js';
 import { aggregateDay, contextFeatures, type SignalRow } from './features.js';
 
 export const FEATURES_PATH = 'rules/features.yaml';
@@ -61,32 +70,40 @@ async function prepare(
   deps: DailyJobDeps,
   child: DailyChild,
   date: string,
+  windowFrom: string,
   defs: readonly FeatureDefinition[],
   rules: RiskRules,
+  scoring: Scoring,
 ): Promise<Prepared> {
   const base = childDocPath(child.familyId, child.childId);
   const [signalSnap, ctxSnap] = await Promise.all([
     deps.db.collection(`${base}/signals`).where('localDate', '==', date).get(),
+    // レベル判定の窓と重なるコンテキスト情報だけを取る：終了済みの古いものはクエリで、未開始のものはメモリ上で除外する
     deps.db
       .collection(`families/${child.familyId}/contextEvents`)
       .where('childIds', 'array-contains', child.childId)
+      .where('endDate', '>=', windowFrom)
       .get(),
   ]);
   const signals = signalSnap.docs.map(
     (d) => d.data() as SignalRow & { explicit?: boolean; signalDefId: string },
   );
-  const contexts = ctxSnap.docs.map((d) => {
+  const contexts = ctxSnap.docs.flatMap((d) => {
     const c = d.data();
-    return {
+    const span = {
       category: c['category'] as ContextCategory,
       startDate: c['startDate'] as string,
       endDate: c['endDate'] as string,
     };
+    return span.startDate <= date ? [span] : [];
   });
-  const features = [...aggregateDay(signals, defs), ...contextFeatures(contextsOn(date, contexts))];
+  const features = [
+    ...aggregateDay(signals, defs, scoring),
+    ...contextFeatures(contextsOn(date, contexts)),
+  ];
   const explicit = explicitL3(
     signals
-      .filter((s) => s.explicit)
+      .filter((s) => s.explicit && isScoredSignal(s, scoring))
       .map((s) => ({ domain: s.domain, signalDefId: s.signalDefId })),
     rules,
   );
@@ -130,10 +147,10 @@ async function holdLevel(
   if (child.currentRiskLevel === 'l4') {
     const open = await deps.db
       .collection(`${base}/crisisEvents`)
-      .where('status', 'in', ['open', 'guardian_acknowledged'])
-      .limit(1)
+      .where('status', 'in', ACTIVE_CRISIS_STATUSES)
       .get();
-    if (!open.empty) return 'l4';
+    const now = deps.now();
+    if (open.docs.some((d) => isCrisisActive(d.data(), now))) return 'l4';
   }
   if (
     rules.daily.hold_l3_until_consultation_resolved &&
@@ -151,6 +168,29 @@ async function holdLevel(
     if (pending) return 'l3';
   }
   return computed;
+}
+
+// 保護者または子どもの確認から 24 時間経った危機イベント、家庭内の危害の類型は検知から 7 日経ったイベントを closed にする（2026-10-10 決定）。
+// 読み取り側はすでに同じルールで判断しているので、ここでは状態をデータに落とし、L4 の解除と後続の集計に根拠を残すだけ。
+async function closeExpiredCrises(deps: DailyJobDeps, child: DailyChild, now: Date) {
+  const base = childDocPath(child.familyId, child.childId);
+  const candidates = await deps.db
+    .collection(`${base}/crisisEvents`)
+    .where('status', 'in', ACTIVE_CRISIS_STATUSES)
+    .get();
+  const expired = candidates.docs.filter((d) => !isCrisisActive(d.data(), now));
+  for (const doc of expired) {
+    await deps.db.runTransaction(async (tx) => {
+      const current = await tx.get(doc.ref);
+      if (current.get('status') === 'closed' || isCrisisActive(current.data() ?? {}, now)) return;
+      tx.update(doc.ref, {
+        status: 'closed',
+        timeline: FieldValue.arrayUnion({ step: 'closed', at: now }),
+      });
+    });
+  }
+  if (expired.length > 0)
+    deps.logger.info('crisis.auto_closed', { pseudoId: child.pseudoId, count: expired.length });
 }
 
 async function applyLevel(
@@ -195,21 +235,73 @@ async function applyLevel(
   return { level, domains };
 }
 
-// 日次ジョブ：date 当日の signals を集計 → daily_features に書き込み → 履歴を読み込み → レベル判定 → 書き戻し
-export async function runDailyJob(deps: DailyJobDeps, date: string): Promise<DailyJobResult> {
+export const JOB_RUNS = 'jobRuns';
+
+// 異常検知は、すべてのシャードがその日の daily_features を書き終えてから実行する。集合を完成させたシャードが実行を担当する。
+// 同じ task のリトライでは index が同じなので、二重に数えることはない
+async function lastShardDone(
+  deps: DailyJobDeps,
+  date: string,
+  shard: Shard,
+  executionId: string,
+): Promise<boolean> {
+  const ref = deps.db.doc(`${JOB_RUNS}/daily-${stableId(date, executionId)}`);
+  return deps.db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const done = new Set<number>((snap.get('doneTasks') as number[] | undefined) ?? []);
+    done.add(shard.index);
+    const complete = done.size >= shard.count && !snap.get('anomaliesStartedAt');
+    tx.set(
+      ref,
+      {
+        job: 'risk-engine-daily',
+        date,
+        taskCount: shard.count,
+        doneTasks: [...done].sort((a, b) => a - b),
+        ...(complete ? { anomaliesStartedAt: deps.now() } : {}),
+        expiresAt: new Date(deps.now().getTime() + batch.jobRunTtlDays * 86_400_000),
+      },
+      { merge: true },
+    );
+    return complete;
+  });
+}
+
+export type DailyJobOptions = { shard?: Shard; executionId?: string };
+
+// 日次ジョブ：date 当日の signals を集計 → daily_features に書き込み → 履歴を読み込み → レベル判定 → 書き戻し。
+// シャード分割時は各 task が inShard の子どもだけを処理し、BigQuery ではその子どもたちの行だけを置き換える
+export async function runDailyJob(
+  deps: DailyJobDeps,
+  date: string,
+  opts: DailyJobOptions = {},
+): Promise<DailyJobResult> {
+  const shard = opts.shard ?? { index: 0, count: 1 };
+  const sharded = shard.count > 1;
   const { kb, logger, store } = deps;
   const rules = await kb.yaml(RULES_PATH, riskRulesSchema);
   const defs = (await kb.yaml(FEATURES_PATH, featuresSchema)).features;
+  const scoring = scoringOf(await loadSignalDefs(kb));
+  const scoredDefs = defs.filter(scoring.scored);
   const holidays = new Set(
     (await kb.yaml(HOLIDAYS_PATH, holidaysSchema)).holidays.map((h) => h.date),
   );
 
-  const children = await listChildren(deps.db);
+  const from = addDays(
+    date,
+    -(rules.daily.baseline.window_days + rules.daily.persistence.lookback_days),
+  );
+  const children = (await listChildren(deps.db)).filter((c) => inShard(c.childId, shard));
+  const shardIds = children.map((c) => c.pseudoId);
+  const write = <T extends PartitionedTable>(table: T, rows: PartitionRows[T]) =>
+    sharded
+      ? store.replaceRows(table, date, shardIds, rows)
+      : store.writePartition(table, date, rows);
   const prepared: Prepared[] = [];
   let failed = 0;
   for (const child of children) {
     try {
-      prepared.push(await prepare(deps, child, date, defs, rules));
+      prepared.push(await prepare(deps, child, date, from, defs, rules, scoring));
     } catch (err) {
       failed++;
       logger.error('daily.prepare_failed', {
@@ -219,16 +311,11 @@ export async function runDailyJob(deps: DailyJobDeps, date: string): Promise<Dai
     }
   }
 
-  await store.writePartition(
+  await write(
     'daily_features',
-    date,
     prepared.flatMap((p) => p.rows),
   );
 
-  const from = addDays(
-    date,
-    -(rules.daily.baseline.window_days + rules.daily.persistence.lookback_days),
-  );
   const history = historyOf(
     await store.readDailyFeatures(
       prepared.map((p) => p.child.pseudoId),
@@ -255,7 +342,7 @@ export async function runDailyJob(deps: DailyJobDeps, date: string): Promise<Dai
         history: (history.get(child.pseudoId) ?? new Map()) as History,
         contexts: p.contexts,
         holidays,
-        features: defs,
+        features: scoredDefs,
         rules,
         inColdStart: cold,
         explicitDomains: p.explicitDomains,
@@ -265,6 +352,7 @@ export async function runDailyJob(deps: DailyJobDeps, date: string): Promise<Dai
           baselineReadyAt: readyAt,
         });
       }
+      await closeExpiredCrises(deps, child, now);
       const { level, domains } = await applyLevel(deps, child, date, out, rules, cold);
       if (level !== child.currentRiskLevel) changed++;
       for (const b of out.baselines) {
@@ -295,15 +383,19 @@ export async function runDailyJob(deps: DailyJobDeps, date: string): Promise<Dai
     }
   }
 
-  await store.writePartition('baselines', date, baselines);
-  await store.writePartition('risk_levels_daily', date, levels);
+  await write('baselines', baselines);
+  await write('risk_levels_daily', levels);
 
   try {
-    await store.refreshAnomalies(date, {
-      retrain: new Date(`${date}T00:00:00Z`).getUTCDay() === 0,
-      threshold: rules.daily.anomaly_prob_threshold,
-      modelVersion: `arima_plus@${kb.version}`,
-    });
+    const runAnomalies =
+      !sharded || (await lastShardDone(deps, date, shard, opts.executionId ?? 'local'));
+    if (runAnomalies) {
+      await store.refreshAnomalies(date, {
+        retrain: new Date(`${date}T00:00:00Z`).getUTCDay() === 0,
+        threshold: rules.daily.anomaly_prob_threshold,
+        modelVersion: `arima_plus@${kb.version}`,
+      });
+    }
   } catch (err) {
     logger.warn('daily.anomalies_failed', {
       error: err instanceof Error ? err : new Error('unknown'),
@@ -311,6 +403,6 @@ export async function runDailyJob(deps: DailyJobDeps, date: string): Promise<Dai
   }
 
   const result = { date, processed: levels.length, failed, changed };
-  logger.info('daily.done', result);
+  logger.info('daily.done', { ...result, taskIndex: shard.index, taskCount: shard.count });
   return result;
 }

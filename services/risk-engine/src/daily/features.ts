@@ -1,11 +1,15 @@
 import type { ContextCategory, Domain } from '@ijime/api-types';
 import type { FeatureDefinition } from '@ijime/kb-loader';
 
+import { isScoredSignal, type Scoring } from '../scoring.js';
+
 // signals ドキュメントのうち集計に使うフィールド。metric がないものはモデルが選んだシグナル
 export type SignalRow = {
   domain: Domain;
   value: number;
   metric?: { name: string; value: number };
+  signalDefId?: string;
+  scoring?: string;
 };
 
 export type FeatureValue = { name: string; domain: Domain; value: number };
@@ -24,15 +28,19 @@ function matches(def: FeatureDefinition, s: SignalRow): number | undefined {
   return s.value;
 }
 
-// 子ども1人の1日分の signals → 日次特徴。その日にシグナルが1件もなければ、1日分まるごとデータなしとする
+// 子ども1人の1日分の signals → 日次特徴。その日にシグナルが1件もなければ、1日分まるごとデータなしとする。
+// スコア対象の特徴には observe シグナルを集計しない。observe シグナルだけで構成される特徴は通常どおり集計して保存するが、レベル判定には使わない
 export function aggregateDay(
   signals: readonly SignalRow[],
   defs: readonly FeatureDefinition[],
+  scoring?: Scoring,
 ): FeatureValue[] {
   if (signals.length === 0) return [];
+  const scoredSignals = scoring ? signals.filter((s) => isScoredSignal(s, scoring)) : signals;
   const out: FeatureValue[] = [];
   for (const def of defs) {
-    const values = signals.map((s) => matches(def, s)).filter((v): v is number => v !== undefined);
+    const pool = scoring?.scored(def) ? scoredSignals : signals;
+    const values = pool.map((s) => matches(def, s)).filter((v): v is number => v !== undefined);
     let value: number | undefined;
     switch (def.agg) {
       case 'count':

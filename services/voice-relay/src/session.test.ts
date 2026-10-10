@@ -2,10 +2,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { OutputFilter } from '@ijime/agent-core';
-import type { CrisisReason, VoiceServerMessage } from '@ijime/api-types';
+import type { VoiceServerMessage } from '@ijime/api-types';
 import { createNoModelDetector, type CrisisCheck } from '@ijime/crisis-detector';
 import { FsKbSource, Kb, lexiconSchema, outputFilterSchema } from '@ijime/kb-loader';
-import { Logger } from '@ijime/service-kit';
+import { Logger, type CrisisRecheckTask } from '@ijime/service-kit';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { Pipe, type LiveEvent, type LiveSession } from './live.js';
@@ -74,17 +74,22 @@ class MemoryStore implements VoiceStore {
   async markSafeMode() {
     this.safeMode = true;
   }
+  voiceSeconds: number[] = [];
+  async recordVoiceSeconds(seconds: number) {
+    this.voiceSeconds.push(seconds);
+  }
   async end() {
     this.ended = true;
   }
 }
 
-async function setup(opts: { transcriptTimeoutMs?: number } = {}) {
+async function setup(opts: { transcriptTimeoutMs?: number; maxDurationMs?: number } = {}) {
   const live = new FakeLive();
   const store = new MemoryStore();
   const out: (VoiceServerMessage | Buffer)[] = [];
   const published: { topic: string; payload: Record<string, unknown> }[] = [];
   const logs: string[] = [];
+  const rechecks: CrisisRecheckTask[] = [];
   let socketClosed = false;
   const detector = createNoModelDetector(await kb.yaml('lexicon/ja.yaml', lexiconSchema));
   const session = new VoiceSession({
@@ -96,9 +101,11 @@ async function setup(opts: { transcriptTimeoutMs?: number } = {}) {
     publish: async (topic, payload) => {
       published.push({ topic, payload });
     },
+    requestRecheck: async (task) => void rechecks.push(task),
     copy: {
       safeReply: 'SAFE',
       retry: 'RETRY',
+      paused: 'PAUSED',
       crisis: (fh) => ({ message: fh ? 'CRISIS_FAMILY' : 'CRISIS', resources: [] }),
     },
     send: (m) => out.push(m),
@@ -128,6 +135,7 @@ async function setup(opts: { transcriptTimeoutMs?: number } = {}) {
     out,
     published,
     logs,
+    rechecks,
     running,
     push,
     settle,
@@ -142,6 +150,26 @@ async function setup(opts: { transcriptTimeoutMs?: number } = {}) {
 const petAudio = (n: number): LiveEvent => ({ type: 'pet_audio', data: Buffer.from([n]) });
 
 describe('VoiceSession', () => {
+  it('ends with limit when the remaining daily voice time runs out and records the usage', async () => {
+    const t = await setup({ maxDurationMs: 30 });
+    await t.running;
+    expect(t.messages()).toEqual([{ type: 'end', reason: 'limit' }]);
+    expect(t.socketClosed()).toBe(true);
+    await t.session.end('stop');
+    expect(t.store.voiceSeconds).toHaveLength(1);
+    expect(t.store.voiceSeconds[0]).toBeGreaterThan(0);
+    expect(t.store.ended).toBe(true);
+  });
+
+  it('records the session time once on a normal stop', async () => {
+    const t = await setup();
+    await t.settle();
+    await t.session.stop();
+    await t.session.stop();
+    expect(t.store.voiceSeconds).toHaveLength(1);
+    expect(t.messages()).toEqual([{ type: 'end', reason: 'stop' }]);
+  });
+
   it('does not release unmetered initial model output before any child utterance', async () => {
     const t = await setup();
     t.push(petAudio(1));
@@ -413,6 +441,7 @@ describe('VoiceSession', () => {
     expect(t.published[1]!.payload).toEqual({
       childId: 'c1',
       crisisId: 'k1',
+      category: 'other',
       familyHarmSuspected: false,
     });
     expect(t.logs.join('\n')).not.toContain('死にたい');
@@ -427,12 +456,17 @@ describe('VoiceSession', () => {
     t.push(petAudio(1));
     await t.settle();
     expect(t.audioOut()).toHaveLength(1);
-    const res = await t.session.escalate('extortion' as CrisisReason);
+    const res = await t.session.escalate('extortion');
     expect(res.crisisId).toBe('k1');
     t.push(petAudio(2));
     await t.settle();
     expect(t.audioOut()).toHaveLength(1);
-    expect(t.store.crises).toEqual([{ agentReason: 'extortion', familyHarmSuspected: false }]);
+    expect(t.store.crises).toEqual([
+      {
+        agentCategory: 'extortion',
+        routing: { category: 'extortion', familyHarmSuspected: false },
+      },
+    ]);
     expect(t.published.at(-1)!.topic).toBe('crisis.detected');
     expect(t.messages().at(-1)).toEqual({ type: 'end', reason: 'crisis' });
   });
@@ -588,7 +622,7 @@ describe('VoiceSession', () => {
     await t.settle();
     t.push(petAudio(2));
     await t.settle();
-    old.resolve({ ...clearCheck(), hit: true, category: 'violence', familyHarmSuspected: true });
+    old.resolve({ ...clearCheck(), hit: true, category: 'family_harm', familyHarmSuspected: true });
     await t.settle();
     t.push(petAudio(3));
     await t.session.stop();
@@ -597,7 +631,7 @@ describe('VoiceSession', () => {
     expect(t.published.at(-1)?.payload['familyHarmSuspected']).toBe(true);
   });
 
-  it('detector rejection fails closed without leaking exception text', async () => {
+  it('detector rejection pauses an unmatched utterance without leaking exception text', async () => {
     const t = await setup();
     vi.spyOn(t.detector, 'check').mockRejectedValue(new Error(SENTINEL));
     t.push({ type: 'child_final', text: SENTINEL });
@@ -606,28 +640,73 @@ describe('VoiceSession', () => {
     await t.session.stop();
     expect(t.audioOut()).toEqual([]);
     expect(t.store.child[0]?.check).toMatchObject({
-      hit: true,
+      hit: false,
+      method: 'paused',
       availability: 'unavailable',
-      familyHarmSuspected: true,
     });
-    expect(t.messages()).toContainEqual({
-      type: 'crisis',
-      message: 'CRISIS_FAMILY',
-      resources: [],
-    });
+    expect(t.messages()).toContainEqual({ type: 'pet_transcript', text: 'PAUSED' });
+    expect(t.store.crises).toEqual([]);
     expect(t.logs.join('\n')).not.toContain(SENTINEL);
   });
 
-  it('agent escalation without a current check uses conservative routing consistently', async () => {
+  it('detector rejection on a keyword hit still enters the crisis path', async () => {
+    const t = await setup();
+    vi.spyOn(t.detector, 'check').mockRejectedValue(new Error('boom'));
+    t.push({ type: 'child_final', text: 'もう死にたい' });
+    await t.settle();
+    await t.session.stop();
+    expect(t.store.child[0]?.check).toMatchObject({ hit: true, category: 'other' });
+    expect(t.messages()).toContainEqual({ type: 'crisis', message: 'CRISIS', resources: [] });
+  });
+
+  it('a paused utterance: held pet audio dropped, fixed line and help shown, recheck queued, no turn charged', async () => {
+    const t = await setup();
+    const reserve = vi.spyOn(t.store, 'reserveOrdinaryTurn');
+    vi.spyOn(t.detector, 'check').mockResolvedValue({
+      ...clearCheck(),
+      availability: 'unavailable',
+      method: 'paused',
+    });
+    t.push({ type: 'child_final', text: SENTINEL });
+    t.push(petAudio(1));
+    t.push({ type: 'pet_final', text: 'HELD' });
+    await t.settle();
+    t.push(petAudio(2));
+    await t.settle();
+    await t.session.stop();
+    expect(t.audioOut()).toEqual([]);
+    expect(t.store.pet).toEqual([]);
+    expect(reserve).not.toHaveBeenCalled();
+    expect(t.messages()).toEqual(
+      expect.arrayContaining([
+        { type: 'interrupted' },
+        { type: 'action', action: { type: 'set_expression', expression: 'sleepy' } },
+        { type: 'pet_transcript', text: 'PAUSED' },
+        { type: 'action', action: { type: 'show_help_resources' } },
+      ]),
+    );
+    expect(t.rechecks).toEqual([
+      { familyId: 'f1', childId: 'c1', sessionId: 's1', messageId: 'm1', channel: 'voice' },
+    ]);
+    expect(t.published.map((p) => p.topic)).not.toContain('message.created');
+    expect(t.logs.join('\n')).not.toContain(SENTINEL);
+  });
+
+  it('agent escalation without a current check routes by the agent category', async () => {
     const t = await setup();
     expect(t.session.canExecuteTools).toBe(false);
     await t.session.escalate('violence');
     await t.session.stop();
-    expect(t.store.crises).toEqual([{ agentReason: 'violence', familyHarmSuspected: true }]);
-    expect(t.published.at(-1)?.payload['familyHarmSuspected']).toBe(true);
+    expect(t.store.crises).toEqual([
+      { agentCategory: 'violence', routing: { category: 'violence', familyHarmSuspected: false } },
+    ]);
+    expect(t.published.at(-1)?.payload).toMatchObject({
+      category: 'violence',
+      familyHarmSuspected: false,
+    });
     expect(t.messages()).toContainEqual({
       type: 'crisis',
-      message: 'CRISIS_FAMILY',
+      message: 'CRISIS',
       resources: [],
     });
   });

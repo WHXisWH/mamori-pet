@@ -71,6 +71,9 @@ export async function findChild(db: Firestore, childId: string): Promise<ChildIn
 }
 
 type GuardianDoc = {
+  role?: unknown;
+  status?: unknown;
+  revokedAt?: unknown;
   email?: string;
   phoneE164?: string;
   notifyChannels?: NotifyChannel[];
@@ -86,16 +89,18 @@ export async function listGuardians(db: Firestore, familyId: string): Promise<Gu
     const { ownerId, fcmToken } = d.data() as { ownerId: string; fcmToken: string };
     tokens.set(ownerId, [...(tokens.get(ownerId) ?? []), fcmToken]);
   }
-  return guardians.docs.map((g) => {
+  return guardians.docs.flatMap((g) => {
     const d = g.data() as GuardianDoc;
+    if (d.revokedAt != null || (d.status !== undefined && d.status !== 'active')) return [];
     const c: GuardianContact = {
       guardianId: g.id,
       notifyChannels: d.notifyChannels ?? ['webpush', 'email'],
       fcmTokens: tokens.get(g.id) ?? [],
     };
+    if (d.role === 'primary' || d.role === 'secondary') c.role = d.role;
     if (d.email) c.email = d.email;
     if (d.phoneE164) c.phoneE164 = d.phoneE164;
-    return c;
+    return [c];
   });
 }
 

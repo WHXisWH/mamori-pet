@@ -12,7 +12,7 @@ import { LogOnlySender, MemorySender } from './channels.js';
 import { careHintId, contentFreeId, staticCareHint } from './consultation.js';
 import { loadTemplate, type NotifierDeps } from './deps.js';
 import type { NotificationDoc } from './store.js';
-import { violations, type WriterOutput } from './writer.js';
+import { loadAdviceObservationPatterns, violations, type WriterOutput } from './writer.js';
 import { MemoryDailyFeatures } from './weekly-source.js';
 
 const KB_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../kb/v0.1.0');
@@ -20,9 +20,10 @@ const SUMMARY = '学校で無視されてつらい';
 const SENTINEL = 'SENTINEL_会話の原文';
 
 const GOOD: WriterOutput = {
-  title: '最近の様子について',
-  changes: ['会話の様子に、いつもと違う傾向が見られました'],
-  meaning: 'ゆっくり話せる時間をつくってみてください',
+  title: 'はなさんからの相談',
+  changes: [],
+  meaning:
+    'お子さんが共有に同意した内容をお届けします。出来事を第三者が確認したものではありません。まずは落ち着いてお話を聞いてみてください。',
   suggestions: {
     try: ['「最近どう？」と声をかける', '一緒に過ごす時間を少し増やす'],
     avoid: ['問い詰める'],
@@ -128,6 +129,52 @@ const notif = async (f: string, id: string) =>
   (await db.doc(`families/${f}/notifications/${id}`).get()).data() as NotificationDoc | undefined;
 
 describe('writer validation', () => {
+  it('does not mistake verbatim trusted facts for a quote, but still checks generated advice', () => {
+    const childSummary = '落ち着いてお話を聞いてほしい';
+    const rules = { banned: [], childSummary, facts: GOOD };
+    expect(violations(GOOD, rules)).toEqual([]);
+    expect(
+      violations(
+        { ...GOOD, suggestions: { ...GOOD.suggestions, try: [childSummary, '話せる時間を選ぶ'] } },
+        rules,
+      ),
+    ).toContain('quote');
+  });
+
+  it.each([
+    '一週間会話が減っているので、一緒に過ごす時間を作ってください',
+    '元気のない日が続いています。声をかけてください',
+    '会話が少ない傾向が見られます。話を聞いてください',
+  ])('rejects observed-fact claims hidden in otherwise valid advice: %s', async (claim) => {
+    expect(
+      violations(
+        { ...GOOD, suggestions: { ...GOOD.suggestions, try: [claim, '話せる時間を選ぶ'] } },
+        {
+          banned: [],
+          childSummary: SUMMARY,
+          facts: GOOD,
+          adviceObservationPatterns: await loadAdviceObservationPatterns(kb),
+        },
+      ),
+    ).toContain('unsupported_observation');
+  });
+
+  it('rejects any model alteration to factual fields, but permits personalized suggestions', () => {
+    const rules = { banned: [], childSummary: SUMMARY, facts: GOOD };
+    expect(
+      violations(
+        { ...GOOD, suggestions: { try: ['一緒に話す時間を選ぶ', '最後まで聞く'], avoid: [] } },
+        rules,
+      ),
+    ).toEqual([]);
+    for (const altered of [
+      { title: '元気のない日が続いています' },
+      { changes: ['会話が減りました'] },
+      { meaning: '学校で無視されています' },
+    ])
+      expect(violations({ ...GOOD, ...altered }, rules)).toContain('unsupported_facts');
+  });
+
   it('rejects banned words, quotes of the summary and empty fields', () => {
     const rules = { banned: ['うつ', 'いじめられている'], childSummary: SUMMARY };
     expect(violations(GOOD, rules)).toEqual([]);
@@ -141,13 +188,15 @@ describe('writer validation', () => {
   it('static fallback drops the change line when there is no basis', async () => {
     const raw = await loadTemplate(kb, 'care_hint');
     const withDays = staticCareHint(raw, 'はな', 7);
-    expect(withDays.changes).toEqual(['この7日ほど、いつもと少し違う様子が見られました。']);
+    expect(withDays.changes).toEqual(['記録上、この7日ほど、いつもと違う傾向が見られました。']);
     expect(withDays.suggestions).toEqual({
-      try: ['「最近どう？なんでも聞くよ」'],
+      try: ['「話したいときに聞くよ」と声をかける', '落ち着いて話せる時間を一緒に決める'],
       avoid: ['問い詰める', 'すぐに学校へ電話する'],
     });
     const none = staticCareHint(raw, 'はな', 0);
     expect(none.changes).toEqual([]);
+    expect(none.title).toBe(GOOD.title);
+    expect(none.meaning).toBe(GOOD.meaning);
     expect(JSON.stringify(none)).not.toContain('0日');
   });
 });
@@ -170,7 +219,7 @@ describe('consultation.resolved', () => {
       payload: {
         ...GOOD,
         childSummary: SUMMARY,
-        reason: { domains: ['a'], days: 1 },
+        reason: { domains: ['a'], days: 0 },
         resources: [expect.objectContaining({ id: 'sos_dial' })],
       },
     });
@@ -179,7 +228,8 @@ describe('consultation.resolved', () => {
     expect(t.tasks.take('notify-send')).toHaveLength(3);
 
     const req = JSON.stringify(t.llm.requests);
-    expect(req).toContain('会話の様子（1日ほど）');
+    expect(req).toContain('会話の様子');
+    expect(req).not.toContain('1日ほど');
     expect(req).not.toContain(SENTINEL);
     expect(t.lines.join('\n')).not.toContain(SUMMARY);
 
@@ -202,9 +252,49 @@ describe('consultation.resolved', () => {
     expect(t.llm.requests).toHaveLength(2);
     const n = (await notif(f, careHintId(c, 'cs2')))!;
     expect(n.templateId).toBe(`templates/notifications/care_hint.ja.md@${kb.version}`);
-    expect(n.payload.title).toBe('最近、はなさんに少し元気のない日が続いています');
+    expect(n.payload.title).toBe(GOOD.title);
+    expect(n.payload.changes).toEqual([]);
+    expect(n.payload.meaning).toBe(GOOD.meaning);
     expect(n.payload.childSummary).toBe(SUMMARY);
     expect(t.lines.some((l) => l.includes('notify.writer_fallback'))).toBe(true);
+  });
+
+  it.each([
+    { name: 'missing assessment', assessmentId: 'child_initiated', days: 0 },
+    { name: 'aggregate evidence', assessmentId: 'a1', days: 7 },
+  ])('preserves the factual boundary for $name', async ({ name, assessmentId, days }) => {
+    const suffix = days === 0 ? 'missing' : 'aggregate';
+    const [f, c] = [`f_nc_${suffix}`, `c_nc_${suffix}`];
+    await seed(f, c, { id: 'cs', level: 'l2', assessmentId, choice: 'proxy' });
+    if (days > 0)
+      await db.doc(`families/${f}/children/${c}/riskAssessments/a1`).set({
+        level: 'l2',
+        explanation: { domains: ['a'], days },
+      });
+    await seedDraft(f, c, 'cs');
+    // Fluent but unsupported facts must never survive either model attempt.
+    const t = setup(
+      reply({ ...GOOD, title: '元気のない日が続いています', meaning: '学校で会話が減っています' }),
+    );
+    expect(
+      (
+        await t.push('/internal/events/consultation-resolved', {
+          childId: c,
+          consultationId: 'cs',
+          choice: 'proxy',
+        })
+      ).status,
+      name,
+    ).toBe(204);
+    const n = (await notif(f, careHintId(c, 'cs')))!;
+    expect(n.payload.title).toBe(GOOD.title);
+    expect(n.payload.meaning).toBe(GOOD.meaning);
+    expect(n.payload.changes).toEqual(
+      days ? ['記録上、この7日ほど、いつもと違う傾向が見られました。'] : [],
+    );
+    expect(n.payload.reason.days).toBe(days);
+    expect(n.payload.childSummary).toBe(SUMMARY);
+    expect(t.llm.requests).toHaveLength(2);
   });
 
   it('L3 not_now sends a content-free alert without the model (S4)', async () => {

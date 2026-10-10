@@ -182,7 +182,9 @@ describe('end-to-end scenarios', () => {
     expect(n.kind).toBe('care_hint');
     expect(n.recipientIds).toEqual(['g1']);
     expect(n.payload.childSummary).toBe(SUMMARY);
-    expect(n.payload.reason).toEqual({ domains: ['a'], days: 1 });
+    expect(n.payload.reason).toEqual({ domains: ['a'], days: 0 });
+    expect(n.payload.changes).toEqual([]);
+    expect(n.payload.meaning).toContain('共有に同意');
     expect(w.tasks.take('notify-send')).toHaveLength(2);
 
     // 子どもが回答済みなら、risk-engine が登録した期限タスクが実行時刻になってもお知らせを送らない

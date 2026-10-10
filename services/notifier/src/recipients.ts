@@ -2,6 +2,7 @@ import type { NotificationKind, NotifyChannel } from '@ijime/api-types';
 
 export type GuardianContact = {
   guardianId: string;
+  role?: 'primary' | 'secondary';
   email?: string;
   phoneE164?: string;
   notifyChannels: NotifyChannel[];
@@ -28,6 +29,13 @@ export function planDeliveries(
       kind === 'crisis' ? ['webpush', 'email', 'sms'] : g.notifyChannels.filter((c) => c !== 'sms');
     return { guardianId: g.guardianId, channels: wanted.filter((c) => reachable(g, c)) };
   });
+}
+
+// 危機通知は初回は主保護者にだけ送り、確認がなければ crisis-escalation が第二保護者を加える（2026-10-05 決定）。
+// 主保護者が見つからないとき（role のない古いデータ）は、多めに送る側に倒して全保護者に送る
+export function firstCrisisRecipients<T extends GuardianContact>(guardians: readonly T[]): T[] {
+  const primary = guardians.filter((g) => g.role === 'primary');
+  return primary.length > 0 ? primary : [...guardians];
 }
 
 export function channelsOf(deliveries: readonly Delivery[]): NotifyChannel[] {

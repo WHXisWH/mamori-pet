@@ -14,7 +14,12 @@ import { isLocalManualPreview, loadEnv } from '@ijime/config';
 import { createRuntimeDetector, loadHotlines, loadSafeModeCopy } from '@ijime/crisis-detector';
 import { KmsKeyWrapper, kmsKeyPath } from '@ijime/crypto';
 import { FsKbSource, Kb, outputFilterSchema, safeRepliesSchema } from '@ijime/kb-loader';
-import { cloudRunIdToken, Logger, PubSubRestPublisher } from '@ijime/service-kit';
+import {
+  cloudRunIdToken,
+  crisisRecheckRequesterFromEnv,
+  Logger,
+  PubSubRestPublisher,
+} from '@ijime/service-kit';
 
 import type { VoiceBackendDeps } from './backend.js';
 import { httpToolCaller } from './forwarder.js';
@@ -22,6 +27,7 @@ import { ResumableGemini } from './live.js';
 import { countMorae, loadTokenizer } from './mora.js';
 
 export const RETRY_LINES_PATH = 'templates/voice_retry.ja.yaml';
+export const PAUSED_LINES_PATH = 'templates/model_unavailable.ja.yaml';
 
 export async function createVoiceRuntime(
   overrides: Partial<VoiceBackendDeps> = {},
@@ -89,7 +95,16 @@ export async function createVoiceRuntime(
     sessions:
       overrides.sessions ?? new FirestoreSessionService(db, directory, { writeUserEvents: false }),
     kb,
-    detector: overrides.detector ?? (await createRuntimeDetector(kb)),
+    detector:
+      overrides.detector ??
+      (await createRuntimeDetector(kb, process.env, {
+        onModelEvent: (e) =>
+          logger.warn('crisis.model_unavailable', {
+            layer: e.layer,
+            kind: e.kind,
+            ...(e.reason ? { reason: e.reason } : {}),
+          }),
+      })),
     filter:
       overrides.filter ??
       new OutputFilter(await kb.yaml('rules/output_filter.yaml', outputFilterSchema)),
@@ -98,6 +113,15 @@ export async function createVoiceRuntime(
       (await kb.yaml('prompts/safe_replies.yaml', safeRepliesSchema)).replies,
     retryLines:
       overrides.retryLines ?? (await kb.yaml(RETRY_LINES_PATH, safeRepliesSchema)).replies,
+    pausedLines:
+      overrides.pausedLines ?? (await kb.yaml(PAUSED_LINES_PATH, safeRepliesSchema)).replies,
+    requestRecheck:
+      overrides.requestRecheck ??
+      crisisRecheckRequesterFromEnv({
+        prod,
+        projectId: env.GCP_PROJECT_ID,
+        location: env.GCP_REGION,
+      }),
     safeModeCopy: overrides.safeModeCopy ?? (await loadSafeModeCopy(kb)),
     hotlines: overrides.hotlines ?? (await loadHotlines(kb)).resources,
     publish,

@@ -93,3 +93,11 @@ export function fillTemplate(
     labeled,
   };
 }
+
+// メールはテンプレートの定型文と保護者側リンクだけで構成する。メール専用行のないテンプレートはプッシュ通知の文言をそのまま使う
+export function emailOf(t: ParsedTemplate, link?: string): { subject: string; body: string } {
+  const body = [t.labeled['メール本文'] ?? t.pushBody, link, t.labeled['メール末尾']].filter(
+    (line): line is string => !!line,
+  );
+  return { subject: t.labeled['メール件名'] ?? t.pushTitle, body: body.join('\n\n') };
+}

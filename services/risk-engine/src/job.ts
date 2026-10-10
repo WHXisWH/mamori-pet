@@ -1,5 +1,5 @@
 import { loadEnv } from '@ijime/config';
-import { Logger } from '@ijime/service-kit';
+import { jobShard, Logger } from '@ijime/service-kit';
 
 import { SERVICE_NAME } from './app.js';
 import { addDays, jstDate } from './daily/calendar.js';
@@ -31,8 +31,12 @@ async function main(): Promise<void> {
   } else {
     store = new MemoryFeatureStore();
   }
-  logger.info('job.start', { date });
-  await runDailyJob({ ...deps, store }, date);
+  const shard = jobShard();
+  logger.info('job.start', { date, taskIndex: shard.index, taskCount: shard.count });
+  await runDailyJob({ ...deps, store }, date, {
+    shard,
+    executionId: process.env['CLOUD_RUN_EXECUTION'] ?? 'local',
+  });
 }
 
 main().catch((err: unknown) => {

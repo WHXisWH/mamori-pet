@@ -20,6 +20,7 @@
     "@ijime/agent-core": "workspace:*",
     "@ijime/api-types": "workspace:*",
     "@ijime/config": "workspace:*",
+    "@ijime/crisis-detector": "workspace:*",
     "@ijime/crypto": "workspace:*",
     "@ijime/kb-loader": "workspace:*",
     "@ijime/service-kit": "workspace:*",

@@ -1,4 +1,5 @@
 import type { BigQuery } from '@google-cloud/bigquery';
+import { batch } from '@ijime/config';
 
 // BigQuery の features_deid には非識別化した数値だけを置く。行には pseudo_id だけがあり、childId もテキストも含まない
 export type DailyFeatureRow = {
@@ -45,12 +46,44 @@ export interface FeatureStore {
     date: string,
     rows: PartitionRows[T],
   ): Promise<void>;
+  // シャード分割ジョブ用：このシャードの子どもの行だけをパーティション内で置き換え、ほかのシャードが書いた行には触れない
+  replaceRows<T extends PartitionedTable>(
+    table: T,
+    date: string,
+    pseudoIds: readonly string[],
+    rows: PartitionRows[T],
+  ): Promise<void>;
   readDailyFeatures(
     pseudoIds: readonly string[],
     from: string,
     to: string,
   ): Promise<DailyFeatureRow[]>;
   refreshAnomalies(date: string, opts: AnomalyOptions): Promise<void>;
+}
+
+const RETRYABLE_BQ =
+  /concurrent update|serialize access|rate limits|too many table update|backendError|internalError/i;
+
+export function retryableBigQueryError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { code?: unknown }).code;
+  return code === 429 || code === 500 || code === 503 || RETRYABLE_BQ.test(err.message);
+}
+
+export async function retryBigQuery<R>(
+  fn: () => Promise<R>,
+  sleep: (ms: number) => Promise<void>,
+  random: () => number = Math.random,
+): Promise<R> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= batch.bigQueryWriteAttempts || !retryableBigQueryError(err)) throw err;
+      const backoff = batch.bigQueryRetryBaseMs * 2 ** (attempt - 1);
+      await sleep(backoff + Math.floor(random() * backoff));
+    }
+  }
 }
 
 const PARTITION_FIELD: Record<PartitionedTable, string> = {
@@ -69,6 +102,17 @@ export class MemoryFeatureStore implements FeatureStore {
     rows: PartitionRows[T],
   ): Promise<void> {
     this.partitions.set(`${table}$${date}`, [...rows]);
+  }
+
+  async replaceRows<T extends PartitionedTable>(
+    table: T,
+    date: string,
+    pseudoIds: readonly string[],
+    rows: PartitionRows[T],
+  ): Promise<void> {
+    const ids = new Set(pseudoIds);
+    const kept = this.rows(table, date).filter((r) => !ids.has(r.pseudo_id));
+    this.partitions.set(`${table}$${date}`, [...kept, ...rows]);
   }
 
   rows<T extends PartitionedTable>(table: T, date: string): PartitionRows[T] {
@@ -119,11 +163,40 @@ export class BigQueryFeatureStore implements FeatureStore {
       });
       return;
     }
+    await this.load(table, date, rows, 'WRITE_TRUNCATE');
+  }
+
+  async replaceRows<T extends PartitionedTable>(
+    table: T,
+    date: string,
+    pseudoIds: readonly string[],
+    rows: PartitionRows[T],
+  ): Promise<void> {
+    if (pseudoIds.length > 0) {
+      await this.retry(() =>
+        this.bq.query({
+          query: `DELETE FROM ${this.ref(table)}
+                  WHERE ${PARTITION_FIELD[table]} = @d AND pseudo_id IN UNNEST(@ids)`,
+          params: { d: date, ids: [...pseudoIds] },
+          types: { d: 'DATE', ids: ['STRING'] },
+          location: this.opts.location,
+        }),
+      );
+    }
+    if (rows.length > 0) await this.retry(() => this.load(table, date, rows, 'WRITE_APPEND'));
+  }
+
+  private async load(
+    table: PartitionedTable,
+    date: string,
+    rows: readonly unknown[],
+    writeDisposition: 'WRITE_TRUNCATE' | 'WRITE_APPEND',
+  ): Promise<void> {
     const target = this.bq.dataset(this.opts.dataset).table(`${table}$${date.replaceAll('-', '')}`);
     await new Promise<void>((resolve, reject) => {
       const stream = target.createWriteStream({
         sourceFormat: 'NEWLINE_DELIMITED_JSON',
-        writeDisposition: 'WRITE_TRUNCATE',
+        writeDisposition,
         location: this.opts.location,
       });
       stream.on('error', reject);
@@ -131,6 +204,12 @@ export class BigQueryFeatureStore implements FeatureStore {
       stream.end(rows.map((r) => JSON.stringify(r)).join('\n'));
     });
   }
+
+  private retry<R>(fn: () => Promise<R>): Promise<R> {
+    return retryBigQuery(fn, this.sleep);
+  }
+
+  private readonly sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
   async readDailyFeatures(
     pseudoIds: readonly string[],

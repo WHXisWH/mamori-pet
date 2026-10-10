@@ -26,12 +26,21 @@ export type WriterOutput = Pick<
   'title' | 'changes' | 'meaning' | 'suggestions'
 >;
 export type Reason = NotificationPayload['reason'];
+type WriterFacts = Pick<WriterOutput, 'title' | 'changes' | 'meaning'>;
 
-const bannedSchema = z.object({ banned: z.array(z.string().min(1)) });
+const bannedSchema = z.object({
+  banned: z.array(z.string().min(1)),
+  advice_observation_patterns: z.array(z.string().min(1)).default([]),
+});
 const domainsSchema = z.object({ labels: z.record(z.string(), z.string()) });
 
 export async function loadBanned(kb: Kb): Promise<string[]> {
   return (await kb.yaml(BANNED_FILE, bannedSchema)).banned;
+}
+
+export async function loadAdviceObservationPatterns(kb: Kb): Promise<RegExp[]> {
+  const rules = await kb.yaml(BANNED_FILE, bannedSchema);
+  return rules.advice_observation_patterns.map((pattern) => new RegExp(pattern, 'u'));
 }
 
 export async function loadDomainLabels(kb: Kb): Promise<Record<string, string>> {
@@ -39,9 +48,11 @@ export async function loadDomainLabels(kb: Kb): Promise<Record<string, string>> 
 }
 
 export function describeReason(reason: Reason, labels: Record<string, string>): string {
-  if (reason.domains.length === 0) return '（特定の領域の変化はありません）';
+  if (reason.domains.length === 0) return '記録上の変化の根拠はありません';
   const names = reason.domains.map((d) => labels[d] ?? d).join('、');
-  return `${names}（${reason.days}日ほど）`;
+  return reason.days > 0
+    ? `${names}（記録上の変化：${reason.days}日ほど）`
+    : `${names}（本人の申告に関連する領域です。観察された変化や継続日数ではありません）`;
 }
 
 export function buildWriterInstruction(
@@ -51,10 +62,11 @@ export function buildWriterInstruction(
     gradeBand: GradeBand;
     explanation: string;
     childSummary: string | null;
+    facts: string;
   },
 ): string {
   return template.replace(
-    /\{(nickname|gradeBand|explanation|childSummary)\}/g,
+    /\{(nickname|gradeBand|explanation|childSummary|facts)\}/g,
     (_m, k: keyof typeof vars) => vars[k] ?? 'null',
   );
 }
@@ -75,13 +87,32 @@ function quotes(text: string, summary: string): boolean {
 
 export function violations(
   out: WriterOutput,
-  rules: { banned: readonly string[]; childSummary: string | null },
+  rules: {
+    banned: readonly string[];
+    childSummary: string | null;
+    facts?: WriterFacts;
+    adviceObservationPatterns?: readonly RegExp[];
+  },
 ): string[] {
   const all = strings(out);
+  const advice = [...out.suggestions.try, ...out.suggestions.avoid];
   const found: string[] = [];
   if (!out.title.trim() || !out.meaning.trim() || all.some((s) => !s.trim())) found.push('empty');
   if (all.some((s) => rules.banned.some((w) => s.includes(w)))) found.push('banned');
-  if (rules.childSummary && all.some((s) => quotes(s, rules.childSummary!))) found.push('quote');
+  const facts = rules.facts;
+  const factsMatch =
+    !facts ||
+    (out.title === facts.title &&
+      out.meaning === facts.meaning &&
+      out.changes.length === facts.changes.length &&
+      out.changes.every((change, i) => change === facts.changes[i]));
+  // Trusted, verbatim template text is not a model quotation of the child's summary.
+  const quoteCandidates = rules.facts && factsMatch ? advice : all;
+  if (rules.childSummary && quoteCandidates.some((s) => quotes(s, rules.childSummary!)))
+    found.push('quote');
+  if (!factsMatch) found.push('unsupported_facts');
+  if (advice.some((s) => rules.adviceObservationPatterns?.some((pattern) => pattern.test(s))))
+    found.push('unsupported_observation');
   return found;
 }
 
@@ -92,15 +123,18 @@ export async function writeCareHint(input: {
   gradeBand: GradeBand;
   reason: Reason;
   childSummary: string | null;
+  facts: WriterFacts;
 }): Promise<StructuredResult<WriterOutput>> {
   const { kb } = input;
   const schema = JSON.parse(await kb.text(WRITER_SCHEMA)) as JsonSchema;
   const banned = await loadBanned(kb);
+  const adviceObservationPatterns = await loadAdviceObservationPatterns(kb);
   const instruction = buildWriterInstruction(await kb.text(WRITER_PROMPT), {
     nickname: input.nickname,
     gradeBand: input.gradeBand,
     explanation: describeReason(input.reason, await loadDomainLabels(kb)),
     childSummary: input.childSummary,
+    facts: JSON.stringify(input.facts),
   });
   const agent = createExtractorAgent({
     name: 'notification_writer',
@@ -114,6 +148,12 @@ export async function writeCareHint(input: {
     schema,
     timeoutMs: models.notificationWriter.timeoutMs ?? 20000,
     maxAttempts: 1 + agentConfig.notificationWriterMaxRetries,
-    accept: (v) => violations(v, { banned, childSummary: input.childSummary }).length === 0,
+    accept: (v) =>
+      violations(v, {
+        banned,
+        childSummary: input.childSummary,
+        facts: input.facts,
+        adviceObservationPatterns,
+      }).length === 0,
   });
 }

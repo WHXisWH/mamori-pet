@@ -221,6 +221,48 @@ describe('daily job', () => {
     ).toBe(1);
   });
 
+  it('observe signals are recorded in daily_features but never judged', async () => {
+    const c = 'c_d_obs';
+    await seedChild(c);
+    await seedHistory(c, 0);
+    await seedTodaySignals(c, false);
+    const signal = (id: string, data: Record<string, unknown>) =>
+      db.doc(`${base(c)}/signals/${id}`).set({
+        value: 1,
+        sourceRef: 'm',
+        kbVersion: kb.version,
+        extractedBy: 'rule',
+        localDate: D,
+        createdAt: NOW,
+        expireAt: NOW,
+        ...data,
+      });
+    await signal('self', {
+      domain: 'd',
+      signalDefId: 'D-SELF-001',
+      scoring: 'observe',
+      explicit: false,
+      metric: { name: 'd_self_size_ratio', value: 0.01 },
+    });
+    await signal('obs-explicit', {
+      domain: 'a',
+      signalDefId: 'A-EXCL-003',
+      scoring: 'observe',
+      explicit: true,
+    });
+    await runDailyJob(deps().d, D);
+
+    expect((await read(base(c)))['currentRiskLevel']).toBe('l0');
+    const features = store.rows('daily_features', D).filter((r) => r.pseudo_id === pid(c));
+    expect(features.find((r) => r.feature_name === 'd_self_size_mean')?.value).toBe(0.01);
+    expect(
+      store
+        .rows('baselines', D)
+        .filter((b) => b.pseudo_id === pid(c))
+        .some((b) => b.feature_name.startsWith('d_')),
+    ).toBe(false);
+  });
+
   it('cold start holds back L2 and records baselineReadyAt', async () => {
     const c = 'c_d2';
     await seedChild(c, { createdAt: new Date('2026-11-01T00:00:00Z') });
@@ -267,5 +309,129 @@ describe('daily job', () => {
     await db.doc(`${base(c)}/crisisEvents/k1`).set({ status: 'guardian_acknowledged' });
     await runDailyJob(deps().d, D);
     expect((await read(base(c)))['currentRiskLevel']).toBe('l4');
+  });
+});
+
+describe('crisis closure 24 hours after acknowledgement', () => {
+  it('closes the event and stops holding L4 once the acknowledgement is 24 hours old', async () => {
+    const c = 'c_d4_closed';
+    await seedChild(c, { level: 'l4' });
+    await seedHistory(c, 0);
+    await seedTodaySignals(c, false);
+    const ref = db.doc(`${base(c)}/crisisEvents/k1`);
+    await ref.set({
+      status: 'guardian_acknowledged',
+      timeline: [{ step: 'guardian_acknowledged', at: new Date(NOW.getTime() - 25 * 3_600_000) }],
+    });
+    await runDailyJob(deps().d, D);
+    const event = (await ref.get()).data()!;
+    expect(event['status']).toBe('closed');
+    expect(event['timeline']).toContainEqual(expect.objectContaining({ step: 'closed' }));
+    expect((await read(base(c)))['currentRiskLevel']).not.toBe('l4');
+  });
+
+  it('keeps the event and L4 while the acknowledgement is younger than 24 hours', async () => {
+    const c = 'c_d4_recent';
+    await seedChild(c, { level: 'l4' });
+    await seedHistory(c, 0);
+    await seedTodaySignals(c, false);
+    const ref = db.doc(`${base(c)}/crisisEvents/k1`);
+    await ref.set({
+      status: 'guardian_acknowledged',
+      timeline: [{ step: 'guardian_acknowledged', at: new Date(NOW.getTime() - 23 * 3_600_000) }],
+    });
+    await runDailyJob(deps().d, D);
+    expect((await ref.get()).get('status')).toBe('guardian_acknowledged');
+    expect((await read(base(c)))['currentRiskLevel']).toBe('l4');
+  });
+
+  it.each([
+    [
+      'child_acknowledged 25 hours ago',
+      {
+        status: 'child_acknowledged',
+        familyHarmSuspected: true,
+        createdAt: new Date(NOW.getTime() - 3 * 86_400_000),
+        timeline: [{ step: 'child_acknowledged', at: new Date(NOW.getTime() - 25 * 3_600_000) }],
+      },
+    ],
+    [
+      'open family harm 8 days old',
+      {
+        status: 'open',
+        familyHarmSuspected: true,
+        createdAt: new Date(NOW.getTime() - 8 * 86_400_000),
+      },
+    ],
+  ])('closes a family-harm event that expired: %s', async (_name, event) => {
+    const c = `c_fh_${_name.length}`;
+    await seedChild(c, { level: 'l4' });
+    await seedHistory(c, 0);
+    await seedTodaySignals(c, false);
+    const ref = db.doc(`${base(c)}/crisisEvents/k1`);
+    await ref.set(event);
+    await runDailyJob(deps().d, D);
+    expect((await ref.get()).get('status')).toBe('closed');
+    expect((await read(base(c)))['currentRiskLevel']).not.toBe('l4');
+  });
+
+  it('keeps an open family-harm event and L4 while it is younger than 7 days', async () => {
+    const c = 'c_fh_recent';
+    await seedChild(c, { level: 'l4' });
+    await seedHistory(c, 0);
+    await seedTodaySignals(c, false);
+    const ref = db.doc(`${base(c)}/crisisEvents/k1`);
+    await ref.set({
+      status: 'open',
+      familyHarmSuspected: true,
+      createdAt: new Date(NOW.getTime() - 6 * 86_400_000),
+    });
+    await runDailyJob(deps().d, D);
+    expect((await ref.get()).get('status')).toBe('open');
+    expect((await read(base(c)))['currentRiskLevel']).toBe('l4');
+  });
+});
+
+describe('sharded daily job', () => {
+  it('two concurrent tasks split the children, keep each other’s rows and refresh anomalies once', async () => {
+    const shardDb = new Firestore({ projectId: `demo-shard-${randomUUID().slice(0, 8)}` });
+    const ids = Array.from({ length: 12 }, (_, i) => `c_s${i}`);
+    for (const c of ids) {
+      await shardDb.doc(base(c)).set({
+        childId: c,
+        familyId: `f_${c}`,
+        nickname: 'はな',
+        gradeBand: 'high',
+        pseudoId: pid(c),
+        status: 'active',
+        currentRiskLevel: 'l0',
+        careFlag: false,
+        createdAt: new Date('2026-08-01T00:00:00Z'),
+      });
+    }
+    const shardStore = new MemoryFeatureStore();
+    const run = (index: number) =>
+      runDailyJob({ ...deps().d, db: shardDb, store: shardStore }, D, {
+        shard: { index, count: 2 },
+        executionId: 'exec-1',
+      });
+    try {
+      const [a, b] = await Promise.all([run(0), run(1)]);
+      expect(a.processed).toBeGreaterThan(0);
+      expect(b.processed).toBeGreaterThan(0);
+      expect(a.processed + b.processed).toBe(ids.length);
+      const levels = () => shardStore.rows('risk_levels_daily', D).map((r) => r.pseudo_id);
+      expect(levels().sort()).toEqual(ids.map(pid).sort());
+      expect(shardStore.anomalyRuns).toHaveLength(1);
+
+      // Cloud Run が同じ task をリトライ：行を重複して書かず、異常検知も再実行しない
+      await run(0);
+      expect(levels().sort()).toEqual(ids.map(pid).sort());
+      expect(shardStore.anomalyRuns).toHaveLength(1);
+      const runs = await shardDb.collection('jobRuns').get();
+      expect(runs.docs.map((d) => d.data()['doneTasks'])).toEqual([[0, 1]]);
+    } finally {
+      await shardDb.terminate();
+    }
   });
 });

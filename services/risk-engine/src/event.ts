@@ -6,6 +6,7 @@ import { SkipEvent, stableId, type EventPayload } from '@ijime/service-kit';
 import { jstDate } from './daily/calendar.js';
 import type { RiskEngineDeps } from './deps.js';
 import { explicitL3, isHigher } from './levels.js';
+import { isScoredSignal, loadSignalDefs, scoringOf } from './scoring.js';
 import {
   commitAssessment,
   explicitSignalsOn,
@@ -33,7 +34,11 @@ export async function handleAssess(
   const now = deps.now();
   const localDate = jstDate(now);
   const rules = await kb.yaml(RULES_PATH, riskRulesSchema);
-  const verdict = explicitL3(await explicitSignalsOn(db, child, localDate), rules);
+  const scoring = scoringOf(await loadSignalDefs(kb));
+  const explicit = (await explicitSignalsOn(db, child, localDate)).filter((s) =>
+    isScoredSignal(s, scoring),
+  );
+  const verdict = explicitL3(explicit, rules);
   if (!verdict.hit) return;
 
   const assessmentId = `event-${stableId(ev.childId, localDate, 'explicit')}`;

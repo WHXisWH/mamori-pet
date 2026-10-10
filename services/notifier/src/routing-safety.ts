@@ -1,4 +1,5 @@
 import type { DocumentSnapshot, Firestore, Transaction } from '@google-cloud/firestore';
+import { isCrisisActive } from '@ijime/config';
 import { SkipEvent } from '@ijime/service-kit';
 
 import { childDocPath, notificationPath, type NotificationDoc } from './store.js';
@@ -16,7 +17,8 @@ export async function readRoutingBlock(
   const crises = await tx.get(db.collection(`${base}/crisisEvents`));
   if (
     crises.docs.some(
-      (crisis) => crisis.get('status') !== 'closed' && crisis.get('familyHarmSuspected') !== false,
+      (crisis) =>
+        isCrisisActive(crisis.data(), new Date()) && crisis.get('familyHarmSuspected') !== false,
     )
   )
     return 'guardian_routing_unsafe';

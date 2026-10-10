@@ -10,6 +10,8 @@ import {
   createPetTools,
   defaultPetName,
   PET_APP_NAME,
+  remainingVoiceSeconds,
+  voiceDisabled,
   type ChildContext,
   type ChildDirectory,
   type ChildRecord,
@@ -17,9 +19,10 @@ import {
   type OutputFilter,
 } from '@ijime/agent-core';
 import type { GradeBand, HelpResource, PubSubTopic, VoiceServerMessage } from '@ijime/api-types';
+import { isCrisisLockingChild } from '@ijime/config';
 import { crisisResponse, type CrisisDetector, type SafeModeCopy } from '@ijime/crisis-detector';
-import type { Kb } from '@ijime/kb-loader';
-import type { Logger } from '@ijime/service-kit';
+import { loadQuickReplyCatalog, type Kb } from '@ijime/kb-loader';
+import type { CrisisRecheckRequester, Logger } from '@ijime/service-kit';
 
 import { forwardingExecutor, type ToolCaller } from './forwarder.js';
 import { openAdkLive, type LiveSession } from './live.js';
@@ -30,7 +33,13 @@ import { redeemTicket, type TicketOwner } from './tickets.js';
 
 export class VoiceOpenError extends Error {
   constructor(
-    readonly reason: 'unknown_child' | 'data_source_disabled' | 'active_crisis' | 'access_revoked',
+    readonly reason:
+      | 'unknown_child'
+      | 'data_source_disabled'
+      | 'active_crisis'
+      | 'access_revoked'
+      | 'voice_disabled'
+      | 'daily_limit',
   ) {
     super(`voice session refused: ${reason}`);
     this.name = 'VoiceOpenError';
@@ -58,6 +67,9 @@ export type VoiceBackendDeps = {
   filter: OutputFilter;
   safeReplies: Record<GradeBand, string>;
   retryLines: Record<GradeBand, string>;
+  // モデルが利用できず入力が保留になったときの定型文（kb templates/model_unavailable.ja.yaml）
+  pausedLines: Record<GradeBand, string>;
+  requestRecheck: CrisisRecheckRequester;
   safeModeCopy: SafeModeCopy;
   hotlines: HelpResource[];
   publish: (topic: PubSubTopic, payload: Record<string, unknown>) => Promise<void>;
@@ -115,6 +127,9 @@ export function createVoiceBackend(deps: VoiceBackendDeps): VoiceBackend {
       const sources = (childDoc?.['dataSources'] ?? {}) as Record<string, boolean>;
       if (sources['voice'] === false) throw new VoiceOpenError('data_source_disabled');
       if (childDoc?.['status'] !== 'active') throw new VoiceOpenError('unknown_child');
+      if (await voiceDisabled(deps.db)) throw new VoiceOpenError('voice_disabled');
+      const remainingSeconds = await remainingVoiceSeconds(deps.db, child, now());
+      if (remainingSeconds <= 0) throw new VoiceOpenError('daily_limit');
       const ref: { session?: VoiceSession } = {};
       const abort = new AbortController();
       let openedLive: LiveSession | undefined;
@@ -156,11 +171,14 @@ export function createVoiceBackend(deps: VoiceBackendDeps): VoiceBackend {
       try {
         await watching;
         assertActive();
-        // A guardian acknowledgement is not confirmation that the child is safe.
+        // A guardian acknowledgement is not confirmation that the child is safe; the event only
+        // counts as closed 24 hours after it. A family-harm event the child acknowledged as safe
+        // stops locking the child at once (decided 2026-10-10).
         const crises = await deps.db
           .collection(`${childPath(child.familyId, child.childId)}/crisisEvents`)
           .get();
-        if (crises.docs.some((doc) => doc.data()['status'] !== 'closed'))
+        const checkedAt = new Date();
+        if (crises.docs.some((doc) => isCrisisLockingChild(doc.data(), checkedAt)))
           throw new VoiceOpenError('active_crisis');
         assertActive();
 
@@ -198,7 +216,11 @@ export function createVoiceBackend(deps: VoiceBackendDeps): VoiceBackend {
             });
             return { error: 'unavailable' };
           },
-          { filter: deps.filter, turnId: () => ref.session?.toolTurnId ?? sessionId },
+          {
+            filter: deps.filter,
+            quickReplyCatalog: await loadQuickReplyCatalog(deps.kb),
+            turnId: () => ref.session?.toolTurnId ?? sessionId,
+          },
         );
         const status = await executor
           .getChildContext(ctx)
@@ -236,9 +258,11 @@ export function createVoiceBackend(deps: VoiceBackendDeps): VoiceBackend {
           filter: deps.filter,
           store: new FirestoreVoiceStore(deps.db, deps.sessions, child, sessionId, now),
           publish: deps.publish,
+          requestRecheck: deps.requestRecheck,
           copy: {
             safeReply: deps.safeReplies[child.gradeBand],
             retry: deps.retryLines[child.gradeBand],
+            paused: deps.pausedLines[child.gradeBand],
             crisis: (familyHarmSuspected) =>
               crisisResponse({
                 familyHarmSuspected,
@@ -252,6 +276,7 @@ export function createVoiceBackend(deps: VoiceBackendDeps): VoiceBackend {
           onEnd: cleanup,
           logger: deps.logger,
           countMorae: deps.countMorae,
+          maxDurationMs: remainingSeconds * 1000,
         });
         ref.session = session;
 

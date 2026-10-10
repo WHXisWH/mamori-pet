@@ -2,10 +2,12 @@ import { NOTIFY_CHANNELS } from '@ijime/api-types';
 import { SkipEvent, stableId } from '@ijime/service-kit';
 import { z } from 'zod';
 
+import type { OutboundMessage } from './channels.js';
 import { loadTemplate, type NotifierDeps } from './deps.js';
 import type { Delivery } from './recipients.js';
 import { checkedNotification } from './routing-safety.js';
 import { getGuardian, recordAttempt, removeStaleTokens } from './store.js';
+import { emailOf } from './templates.js';
 
 export const SEND_TASK_PATH = '/internal/tasks/send';
 
@@ -52,13 +54,15 @@ export async function handleSendTask(deps: NotifierDeps, task: SendTask): Promis
 
   const guardian = await getGuardian(db, task.familyId, task.guardianId);
   const t = await loadTemplate(deps.kb, initial.kind);
-  const msg = {
+  const link = deps.guardianWebOrigin
+    ? `${deps.guardianWebOrigin}/notifications/${task.notificationId}`
+    : undefined;
+  const msg: OutboundMessage = {
     notificationId: task.notificationId,
     pushTitle: t.pushTitle,
     pushBody: t.pushBody,
-    ...(deps.guardianWebOrigin
-      ? { link: `${deps.guardianWebOrigin}/notifications/${task.notificationId}` }
-      : {}),
+    email: emailOf(t, link),
+    ...(link ? { link } : {}),
   };
   const notif = await checkedNotification(db, task.familyId, task.notificationId);
   if (task.round > 0 && notif.acknowledgedAt) throw new SkipEvent('already_acknowledged');

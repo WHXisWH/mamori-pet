@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 import { Firestore } from '@google-cloud/firestore';
 import { FsKbSource, Kb, weeklyReportSentencesSchema } from '@ijime/kb-loader';
-import { Logger, MemoryTaskQueue } from '@ijime/service-kit';
+import { batch } from '@ijime/config';
+import { Logger, MemoryTaskQueue, shardOf } from '@ijime/service-kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from './app.js';
@@ -163,7 +164,16 @@ describe('weekly report job', () => {
         headers: { 'Content-Type': 'application/json' },
       });
 
-    expect((await post(WEEKLY_REPORT_PATH, {})).status).toBe(204);
+    // Scheduler からの呼び出しはシャードタスクをファンアウトするだけ。シャードは1つずつ実行する
+    const runWeekly = async (body: unknown) => {
+      expect((await post(WEEKLY_REPORT_PATH, body)).status).toBe(204);
+      const shards = tasks.take('weekly-report');
+      expect(shards.map((t) => t.url)).toEqual(
+        Array(batch.weeklyReportShards).fill(`http://notifier.test${WEEKLY_REPORT_PATH}`),
+      );
+      for (const t of shards) expect((await post(WEEKLY_REPORT_PATH, t.body)).status).toBe(204);
+    };
+    await runWeekly({});
 
     const report = (
       await db.doc(`families/${f}/children/${c}/weeklyReports/2026-W40`).get()
@@ -200,7 +210,7 @@ describe('weekly report job', () => {
     expect(mine).toHaveLength(1);
 
     // 同じ週の再実行：通知もタスクも重複しない
-    expect((await post(WEEKLY_REPORT_PATH, { weekStart: '2026-09-28' })).status).toBe(204);
+    await runWeekly({ weekStart: '2026-09-28' });
     expect(
       tasks.tasks.filter((t) => (t.body as { notificationId: string }).notificationId === id),
     ).toHaveLength(1);
@@ -212,5 +222,55 @@ describe('weekly report job', () => {
       pushBody: '今週の元気度が届きました。アプリで確認してください。',
     });
     expect(lines.join('\n')).not.toContain('はな');
+  });
+
+  it('a shard only reports on the children that hash into it', async () => {
+    const ids = Array.from({ length: 8 }, (_, i) => `c_wshard${i}`);
+    for (const c of ids) {
+      await db.doc(`families/f_${c}/children/${c}`).set({
+        childId: c,
+        familyId: `f_${c}`,
+        nickname: 'はな',
+        gradeBand: 'high',
+        pseudoId: `p_${c}`,
+        status: 'active',
+      });
+    }
+    const logger = new Logger('notifier', () => undefined);
+    const deps: NotifierDeps = {
+      db,
+      kb,
+      model: 'unused',
+      tasks: new MemoryTaskQueue(),
+      senders: {
+        webpush: new MemorySender(),
+        email: new LogOnlySender('email', logger),
+        sms: new LogOnlySender('sms', logger),
+      },
+      logger,
+      selfUrl: 'http://notifier.test',
+      features: new MemoryDailyFeatures([]),
+      now: () => new Date('2026-10-04T22:00:00Z'),
+    };
+    const app = createApp(async () => deps, logger);
+    const res = await app.request(WEEKLY_REPORT_PATH, {
+      method: 'POST',
+      body: JSON.stringify({ weekStart: '2026-09-21', shard: 1, shardCount: 3 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status).toBe(204);
+    for (const c of ids) {
+      const report = await db.doc(`families/f_${c}/children/${c}/weeklyReports/2026-W39`).get();
+      expect(report.exists, c).toBe(shardOf(c, 3) === 1);
+    }
+
+    // シャード番号が範囲外のタスクは不正なペイロードとして捨てる（204、リトライなし）。ファンアウトにフォールバックはしない
+    const bad = await app.request(WEEKLY_REPORT_PATH, {
+      method: 'POST',
+      body: JSON.stringify({ shard: 3, shardCount: 3 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(bad.status).toBe(204);
+    expect((deps.tasks as MemoryTaskQueue).tasks).toEqual([]);
   });
 });

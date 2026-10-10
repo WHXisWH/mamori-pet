@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { OutputFilter } from '@ijime/agent-core';
 import type {
-  CrisisReason,
+  CrisisHitCategory,
   GradeBand,
   HelpResource,
   PetAction,
@@ -10,8 +10,14 @@ import type {
   VoiceServerMessage,
 } from '@ijime/api-types';
 import { voice as voiceConfig } from '@ijime/config';
-import type { CrisisCheck, CrisisDetector } from '@ijime/crisis-detector';
-import type { Logger } from '@ijime/service-kit';
+import {
+  isPaused,
+  routingOfCheck,
+  type CrisisCheck,
+  type CrisisDetector,
+  type CrisisRouting,
+} from '@ijime/crisis-detector';
+import type { CrisisRecheckRequester, Logger } from '@ijime/service-kit';
 
 import { analyzeUtterance, speechRate, VadSegmenter, type Utterance } from './features.js';
 import { VoiceGate, type GateInput } from './gate.js';
@@ -23,6 +29,8 @@ export type EndReason = Extract<VoiceServerMessage, { type: 'end' }>['reason'];
 export type VoiceCopy = {
   safeReply: string;
   retry: string;
+  // モデルが利用できずこの発話が保留になったときは、子どもにもう一度話すよう頼む
+  paused: string;
   crisis: (familyHarmSuspected: boolean) => { message: string; resources: HelpResource[] };
 };
 
@@ -33,6 +41,7 @@ export type VoiceSessionDeps = {
   filter: OutputFilter;
   store: VoiceStore;
   publish: (topic: PubSubTopic, payload: Record<string, unknown>) => Promise<void>;
+  requestRecheck: CrisisRecheckRequester;
   copy: VoiceCopy;
   send: (out: VoiceServerMessage | Buffer) => void;
   closeSocket: () => void;
@@ -41,6 +50,8 @@ export type VoiceSessionDeps = {
   countMorae: (text: string) => Promise<number>;
   transcriptTimeoutMs?: number;
   idleTimeoutMs?: number;
+  // 当日の残り音声時間。尽きたら end（limit）を送る
+  maxDurationMs?: number;
 };
 
 const PRIOR_TURNS = 3;
@@ -73,6 +84,8 @@ export class VoiceSession {
   private readonly inflight = new Set<Promise<unknown>>();
   private transcriptTimer: NodeJS.Timeout | undefined;
   private idleTimer: NodeJS.Timeout | undefined;
+  private limitTimer: NodeJS.Timeout | undefined;
+  private attachedAt: number | undefined;
   private ended = false;
   private revoked = false;
   private crisisId: Promise<string> | undefined;
@@ -101,6 +114,11 @@ export class VoiceSession {
   attach(live: LiveSession): Promise<void> {
     if (this.ended) return live.close();
     this.live = live;
+    this.attachedAt = Date.now();
+    if (this.deps.maxDurationMs !== undefined) {
+      this.limitTimer = setTimeout(() => void this.end('limit'), this.deps.maxDurationMs);
+      this.limitTimer.unref();
+    }
     this.resetIdle();
     return (async () => {
       for await (const ev of live.events) this.onLive(ev);
@@ -135,22 +153,22 @@ export class VoiceSession {
   }
 
   // ペットが escalate_crisis を呼んだ：検知でヒットしたときと同じ中断経路を通る
-  async escalate(reason: CrisisReason): Promise<{ crisisId: string }> {
+  async escalate(category: CrisisHitCategory): Promise<{ crisisId: string }> {
     if (this.revoked) throw new Error('voice_access_revoked');
     if (this.gate.phase !== 'crisis') {
       this.deps.logger.warn('crisis.agent_escalate', {
         pseudoId: this.deps.child.childId,
         sessionId: this.deps.sessionId,
-        reason,
+        category,
       });
       const check = this.latestCheck?.epoch === this.epoch ? this.latestCheck.check : undefined;
-      const familyHarmSuspected =
-        check && check.availability !== 'unavailable' ? check.familyHarmSuspected : true;
+      // 今回の検知で家庭内の危害と判定済みなら検知結果を優先し、ペットのカテゴリで上書きさせない
+      const routing =
+        check?.availability !== 'unavailable' && check?.familyHarmSuspected
+          ? routingOfCheck(check)
+          : routingOfCheck({ category });
       this.apply({ type: 'escalate' }, () =>
-        this.enterCrisis(familyHarmSuspected, {
-          agentReason: reason,
-          familyHarmSuspected,
-        }),
+        this.enterCrisis(routing, { agentCategory: category }),
       );
     }
     return { crisisId: (await this.crisisId?.catch(() => '')) ?? '' };
@@ -177,6 +195,9 @@ export class VoiceSession {
     this.deps.onEnd?.();
     clearTimeout(this.transcriptTimer);
     clearTimeout(this.idleTimer);
+    clearTimeout(this.limitTimer);
+    const elapsedSeconds =
+      this.attachedAt === undefined ? 0 : (Date.now() - this.attachedAt) / 1000;
     this.utterances = [];
     this.pendingPetTranscript = undefined;
     this.vad.discard();
@@ -187,6 +208,10 @@ export class VoiceSession {
       await Promise.allSettled([...this.inflight]);
       await this.chain;
       await this.crisisId?.catch(() => undefined);
+      if (!this.revoked && elapsedSeconds > 0)
+        await this.deps.store
+          .recordVoiceSeconds(elapsedSeconds)
+          .catch(() => this.logError('voice.usage_failed'));
       if (!this.revoked)
         await this.deps.store.end().catch(() => this.logError('session.end_failed'));
       this.deps.logger.info('voice.session_end', {
@@ -277,16 +302,20 @@ export class VoiceSession {
           priorTurns: prior,
         }),
       )
-      .catch((): CrisisCheck => ({
-        hit: true,
-        category: 'none',
-        familyHarmSuspected: true,
-        availability: 'unavailable',
-        method: 'review_timeout',
-        keywordMatched: false,
-        confidence: 0,
-        latencyMs: 0,
-      }));
+      // 検知器自体のエラー：キーワードにヒットしていれば危機として扱い、そうでなければモデル利用不可と同じくこの発話を保留する
+      .catch((): CrisisCheck => {
+        const keyword = this.deps.detector.keywordOnly(text);
+        return {
+          hit: keyword,
+          category: keyword ? 'other' : 'none',
+          familyHarmSuspected: false,
+          availability: 'unavailable',
+          method: keyword ? 'review_timeout' : 'paused',
+          keywordMatched: keyword,
+          confidence: 0,
+          latencyMs: 0,
+        };
+      });
     const handled = checked.then(async (check) => {
       if (this.revoked) return;
       if (epoch === this.epoch) this.latestCheck = { epoch, check };
@@ -301,11 +330,26 @@ export class VoiceSession {
       if (check.hit) {
         const messageId = this.persistChild(text, check, utterances);
         this.apply({ type: 'full', hit: true }, () =>
-          this.enterCrisis(check.familyHarmSuspected, { messageId, check }),
+          this.enterCrisis(routingOfCheck(check), { messageId, check }),
         );
         return;
       }
       void this.persistChild(text, check, utterances);
+      if (isPaused(check)) {
+        if (this.ended || epoch !== this.epoch || this.gate.phase !== 'holding') return;
+        this.gate.dispose();
+        this.pendingPetTranscript = undefined;
+        this.passedFinal = false;
+        this.checkedEpoch = -1;
+        this.deps.send({ type: 'interrupted' });
+        this.deps.send({
+          type: 'action',
+          action: { type: 'set_expression', expression: 'sleepy' },
+        });
+        this.deps.send({ type: 'pet_transcript', text: this.deps.copy.paused });
+        this.deps.send({ type: 'action', action: { type: 'show_help_resources' } });
+        return;
+      }
       if (this.ended || epoch !== this.epoch || this.gate.phase !== 'holding') return;
       let allowed = false;
       try {
@@ -357,6 +401,32 @@ export class VoiceSession {
         });
       }
       if (this.revoked) return id;
+      // 保留した発話は再審査のあとで signal-worker が message.created を発行する
+      if (isPaused(check)) {
+        await this.deps
+          .requestRecheck({
+            familyId: child.familyId,
+            childId: child.childId,
+            sessionId,
+            messageId: id,
+            channel: 'voice',
+          })
+          .then(
+            () =>
+              this.deps.logger.warn('crisis.paused', {
+                pseudoId: child.childId,
+                sessionId,
+                messageId: id,
+              }),
+            () =>
+              this.deps.logger.error('crisis.recheck_enqueue_failed', {
+                pseudoId: child.childId,
+                sessionId,
+                messageId: id,
+              }),
+          );
+        return id;
+      }
       await this.deps.publish('message.created', {
         familyId: child.familyId,
         childId: child.childId,
@@ -488,35 +558,30 @@ export class VoiceSession {
   }
 
   private enterCrisis(
-    familyHarmSuspected: boolean,
+    routing: CrisisRouting,
     source:
-      | { messageId: Promise<string>; check: CrisisCheck }
-      | { agentReason: CrisisReason; familyHarmSuspected: boolean },
+      { messageId: Promise<string>; check: CrisisCheck } | { agentCategory: CrisisHitCategory },
   ): void {
     const { child, sessionId, store, logger } = this.deps;
-    const { message, resources } = this.deps.copy.crisis(familyHarmSuspected);
+    const { message, resources } = this.deps.copy.crisis(routing.familyHarmSuspected);
     if (!this.ended) this.deps.send({ type: 'crisis', message, resources });
     this.crisisId = (async () => {
       const ref =
         'check' in source
           ? { messageId: await source.messageId, check: source.check }
-          : { agentReason: source.agentReason, familyHarmSuspected };
+          : { agentCategory: source.agentCategory, routing };
       if (this.revoked) return '';
       await store.markSafeMode();
       if (this.revoked) return '';
       const crisisId = await store.recordCrisis(ref);
       if (this.revoked) return '';
-      await this.deps.publish('crisis.detected', {
-        childId: child.childId,
-        crisisId,
-        familyHarmSuspected,
-      });
+      await this.deps.publish('crisis.detected', { childId: child.childId, crisisId, ...routing });
       logger.warn('crisis.detected', {
         pseudoId: child.childId,
         sessionId,
         crisisId,
         trigger: 'voice',
-        familyHarmSuspected,
+        ...routing,
       });
       return crisisId;
     })();

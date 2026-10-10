@@ -1,8 +1,8 @@
 import type { GradeBand, MoodWeather } from '@ijime/api-types';
 import { MOOD_WEATHERS } from '@ijime/api-types';
-import { weeklyReport as rules } from '@ijime/config';
+import { batch, weeklyReport as rules } from '@ijime/config';
 import { moodScoresSchema, weeklyReportSentencesSchema, type MoodScores } from '@ijime/kb-loader';
-import { stableId } from '@ijime/service-kit';
+import { inShard, stableId, type Shard } from '@ijime/service-kit';
 import { z } from 'zod';
 
 import { enqueueSends } from './delivery.js';
@@ -20,13 +20,22 @@ import type { DailyFeatureRow } from './weekly-source.js';
 
 export const WEEKLY_REPORT_PATH = '/internal/jobs/weekly-report';
 
-// Cloud Scheduler が毎週月曜 07:00 に呼び出す。weekStart は特定の週を再実行するときに使う（月曜の日付）
-export const weeklyJobSchema = z.strictObject({
-  weekStart: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-});
+// Cloud Scheduler が毎週月曜 07:00 に呼び出す。weekStart は特定の週を再実行するときに使う（月曜の日付）。
+// shard を持たないリクエストはファンアウトだけを担当する：シャードごとに Cloud Task を1つ同じパスへ投げ、子ども ID のハッシュで分割する
+export const weeklyJobSchema = z
+  .strictObject({
+    weekStart: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    shard: z.int().min(0).optional(),
+    shardCount: z.int().min(1).max(50).optional(),
+  })
+  .refine(
+    (j) =>
+      (j.shard === undefined) === (j.shardCount === undefined) &&
+      (j.shard === undefined || j.shard < j.shardCount!),
+  );
 export type WeeklyJob = z.infer<typeof weeklyJobSchema>;
 
 export type Vitality = {
@@ -129,13 +138,33 @@ async function listActiveChildren(deps: NotifierDeps): Promise<ReportChild[]> {
 export const weeklyNotificationId = (childId: string, weekId: string) =>
   `weekly-${stableId(childId, weekId)}`;
 
-// 週次レポートはモデルを経由しない：元気度は daily_features から計算し、ひとこと解説は kb のテンプレートからルールで選ぶ
 export async function runWeeklyReport(deps: NotifierDeps, job: WeeklyJob): Promise<void> {
-  const { db, kb, logger } = deps;
   const weekStart = job.weekStart ?? previousWeek(deps.now()).weekStart;
+  if (job.shard !== undefined)
+    return runWeeklyShard(deps, weekStart, { index: job.shard, count: job.shardCount! });
+  const count = batch.weeklyReportShards;
+  if (count <= 1) return runWeeklyShard(deps, weekStart, { index: 0, count: 1 });
+  const weekId = isoWeekId(weekStart);
+  for (let index = 0; index < count; index++) {
+    const body: WeeklyJob = { weekStart, shard: index, shardCount: count };
+    // 定時実行では決定論的なタスク名を使い、Scheduler のリトライでファンアウトが重複しないようにする。weekStart 指定の再実行ではタスク名を付けない。
+    // 付けると、実行済みタスク名に対する Cloud Tasks の重複排除に引っかかるため。シャードの再実行自体は冪等
+    await deps.tasks.enqueue({
+      queue: 'weekly-report',
+      url: `${deps.selfUrl}${WEEKLY_REPORT_PATH}`,
+      body,
+      ...(job.weekStart ? {} : { taskId: `weekly-${stableId(weekId, index, count)}` }),
+    });
+  }
+  deps.logger.info('notify.weekly_report_fanout', { weekId, shards: count });
+}
+
+// 週次レポートはモデルを経由しない：元気度は daily_features から計算し、ひとこと解説は kb のテンプレートからルールで選ぶ
+async function runWeeklyShard(deps: NotifierDeps, weekStart: string, shard: Shard): Promise<void> {
+  const { db, kb, logger } = deps;
   const weekEnd = addDays(weekStart, 6);
   const weekId = isoWeekId(weekStart);
-  const children = await listActiveChildren(deps);
+  const children = (await listActiveChildren(deps)).filter((c) => inShard(c.childId, shard));
   const rows = await deps.features.read(
     children.map((c) => c.pseudoId),
     weekStart,
@@ -208,7 +237,13 @@ export async function runWeeklyReport(deps: NotifierDeps, job: WeeklyJob): Promi
       });
     }
   }
-  logger.info('notify.weekly_report_done', { weekId, children: children.length, failed });
-  // 失敗があれば Scheduler にリトライさせる。作成済みの週次レポートは上書きされ、通知は決定論的な ID により重複しない
+  logger.info('notify.weekly_report_done', {
+    weekId,
+    shard: shard.index,
+    shardCount: shard.count,
+    children: children.length,
+    failed,
+  });
+  // 失敗があればこのシャードを Cloud Tasks にリトライさせる。作成済みの週次レポートは上書きされ、通知は決定論的な ID により重複しない
   if (failed > 0) throw new Error(`weekly report failed for ${failed} children`);
 }

@@ -17,6 +17,7 @@ import { RISK_LEVELS } from '@ijime/api-types';
 
 import { assess, type AssessInput, type History } from './assess.js';
 import { addDays, dayType, type ContextSpan } from './calendar.js';
+import { loadSignalDefs, scoringOf, type Scoring } from '../scoring.js';
 import { aggregateDay } from './features.js';
 
 const KB_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../kb/v0.1.0');
@@ -25,14 +26,18 @@ const D = '2026-11-20';
 let rules: RiskRules;
 let defs: FeatureDefinition[];
 let holidays: Set<string>;
+let scoring: Scoring;
+let scoredDefs: FeatureDefinition[];
 
 beforeAll(async () => {
   const kb = await Kb.load(new FsKbSource(KB_DIR));
+  scoring = scoringOf(await loadSignalDefs(kb));
   rules = await kb.yaml('rules/risk_rules.yaml', riskRulesSchema);
   defs = (await kb.yaml('rules/features.yaml', featuresSchema)).features;
   holidays = new Set(
     (await kb.yaml('resources/jp_holidays.yaml', holidaysSchema)).holidays.map((h) => h.date),
   );
+  scoredDefs = defs.filter(scoring.scored);
 });
 
 // 各領域に代表の特徴を1つ：ふだんの値には少しゆらぎを持たせ、逸脱時は明らかに悪化した値にする
@@ -41,18 +46,21 @@ const NORMAL: Record<string, (i: number) => number> = {
   i_message_count: (i) => 10 + (i % 5),
   k_delete_ratio_mean: (i) => 0.08 + (i % 3) * 0.01,
   v_speech_rate_mean: (i) => 4 + (i % 4) * 0.1,
+  d_isolated_mean: (i) => (i % 4) * 0.1,
 };
 const BAD: Record<string, number> = {
   a_valence_mean: -0.6,
   i_message_count: 1,
   k_delete_ratio_mean: 0.6,
   v_speech_rate_mean: 1.5,
+  d_isolated_mean: 1,
 };
 const FEATURE_OF: Partial<Record<Domain, string>> = {
   a: 'a_valence_mean',
   i: 'i_message_count',
   k: 'k_delete_ratio_mean',
   v: 'v_speech_rate_mean',
+  d: 'd_isolated_mean',
 };
 
 type Spec = {
@@ -69,7 +77,11 @@ function build(spec: Spec): Map<string, Map<string, number>> {
     const date = addDays(D, -i);
     if (spec.missing?.includes(date)) continue;
     const day = new Map<string, number>();
-    for (const [name, f] of Object.entries(NORMAL)) day.set(name, f(i));
+    for (const [name, f] of Object.entries(NORMAL)) {
+      // D は使うケースにだけ登場させ、プロパティテストの履歴は元の規模のままにする
+      if (name.startsWith('d_') && spec.deviate?.d === undefined) continue;
+      day.set(name, f(i));
+    }
     for (const [domain, n] of Object.entries(spec.deviate ?? {})) {
       if (i < n!) day.set(FEATURE_OF[domain as Domain]!, BAD[FEATURE_OF[domain as Domain]!]!);
     }
@@ -128,6 +140,30 @@ describe('aggregateDay', () => {
     expect(by['k_delete_ratio_mean']).toBeUndefined();
     expect(aggregateDay([], defs)).toEqual([]);
   });
+
+  it('keeps observe signals out of scored features but still records observe features', () => {
+    expect(scoring.scored(defs.find((f) => f.name === 'a_concern_sum')!)).toBe(true);
+    expect(scoring.scored(defs.find((f) => f.name === 'd_self_size_mean')!)).toBe(false);
+    expect(scoring.scored(defs.find((f) => f.name === 'd_story_negative_mean')!)).toBe(false);
+    const out = aggregateDay(
+      [
+        { domain: 'a', value: 0.8, signalDefId: 'A-TEASE-001' },
+        // 書き込み時に observe と記された古いシグナルも、kb 側で observe に変わったシグナルも、スコア対象の特徴には数えない
+        { domain: 'a', value: 0.9, signalDefId: 'A-TEASE-001', scoring: 'observe' },
+        {
+          domain: 'd',
+          value: 1,
+          signalDefId: 'D-SELF-001',
+          metric: { name: 'd_self_size_ratio', value: 0.1 },
+        },
+      ],
+      defs,
+      scoring,
+    );
+    const by = Object.fromEntries(out.map((f) => [f.name, f.value]));
+    expect(by['a_concern_sum']).toBeCloseTo(0.8);
+    expect(by['d_self_size_mean']).toBeCloseTo(0.1);
+  });
 });
 
 describe('assess: level table', () => {
@@ -156,10 +192,49 @@ describe('assess: level table', () => {
     },
     { name: 'low-weight domain alone', spec: { deviate: { k: 10 } }, level: 'l0', domains: [] },
     {
-      name: 'low-weight domain with another',
+      // 重みの低い領域は 0.5 として数える：1 + 0.5 では L2 に必要な 2 領域に届かない
+      name: 'low-weight domain with another counts as half',
       spec: { deviate: { k: 7, a: 7 } },
-      level: 'l2',
+      level: 'l1',
       domains: ['a', 'k'],
+    },
+    {
+      name: 'two full domains plus a low-weight one',
+      spec: { deviate: { a: 7, i: 7, k: 7 } },
+      level: 'l2',
+      domains: ['a', 'k', 'i'],
+    },
+    {
+      name: 'D and K together never trigger a level',
+      spec: { deviate: { d: 10, k: 10 } },
+      level: 'l0',
+      domains: [],
+    },
+    {
+      name: 'A and D for 7 days: 1.5 domains',
+      spec: { deviate: { a: 7, d: 7 } },
+      level: 'l1',
+      domains: ['a', 'd'],
+    },
+    {
+      name: 'low-weight domains do not count toward L3 today',
+      spec: { deviate: { a: 1, i: 1, k: 1 } },
+      level: 'l0',
+      domains: [],
+    },
+    {
+      name: 'cold start: three domains today is not L3',
+      spec: { deviate: { a: 1, i: 1, v: 1 } },
+      over: { inColdStart: true },
+      level: 'l0',
+      domains: [],
+    },
+    {
+      name: 'cold start, first day: one artwork and two signals',
+      spec: { deviate: { d: 1, a: 1, i: 1 } },
+      over: { inColdStart: true },
+      level: 'l0',
+      domains: [],
     },
     {
       name: 'three domains today',
@@ -231,6 +306,24 @@ describe('assess: level table', () => {
       });
     });
   }
+
+  it('observe-only features cannot move the level, however far they deviate', () => {
+    expect(scoredDefs.some((f) => f.domain === 'd')).toBe(false);
+    const spec: Spec = {
+      deviate: { a: 7, d: 14, k: 7 },
+      extra: (date, day) => {
+        day.set('d_self_size_mean', date > addDays(D, -14) ? 0.01 : 0.4);
+        day.set('d_story_negative_mean', date > addDays(D, -14) ? 1 : 0);
+      },
+    };
+    // フィルタなしなら A 1 + D 0.5 + K 0.5 = 2 → L2。observe を読まなくなると A + K = 1.5 だけ残り → L1
+    expect(run(spec).level).toBe('l2');
+    const out = run(spec, { features: scoredDefs });
+    expect({ level: out.level, domains: out.domainsFlagged }).toEqual({
+      level: 'l1',
+      domains: ['a', 'k'],
+    });
+  });
 
   it('explanation carries domains and whole days only', () => {
     const out = run({ deviate: { a: 9, i: 7 } });

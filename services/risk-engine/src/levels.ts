@@ -9,7 +9,7 @@ export function isHigher(a: RiskLevel, b: RiskLevel): boolean {
   return rank(a) > rank(b);
 }
 
-export type ExplicitSignal = { domain: Domain; signalDefId: string };
+export type ExplicitSignal = { domain: Domain; signalDefId: string; scoring?: string };
 
 // 明確な発言のルール：kb の levels.l3.or_explicit_in にある領域で explicit シグナルが出たら L3 と判定する。コールドスタートの制限を受けない
 export function explicitL3(

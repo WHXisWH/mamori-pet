@@ -6,9 +6,11 @@ import {
   DevChildDirectory,
   FirestoreChildDirectory,
   FirestoreSessionService,
+  ScopedChildDirectory,
   type ChildDirectory,
 } from '@ijime/agent-core';
 import { loadEnv } from '@ijime/config';
+import { createRuntimeDetector } from '@ijime/crisis-detector';
 import { KmsKeyWrapper, kmsKeyPath } from '@ijime/crypto';
 import { FsKbSource, Kb } from '@ijime/kb-loader';
 import { Logger, MemoryPublisher, PubSubRestPublisher } from '@ijime/service-kit';
@@ -49,6 +51,8 @@ export async function createRuntime(
     }
   }
 
+  directory = new ScopedChildDirectory(directory);
+
   const publisher =
     overrides.publisher ??
     (env.GCP_PROJECT_ID && (prod || env.PUBSUB_EMULATOR_HOST)
@@ -57,6 +61,16 @@ export async function createRuntime(
   const gemini = { projectId: env.GCP_PROJECT_ID!, location: env.GCP_REGION };
   const model = overrides.model ?? createGemini('signalExtract', gemini);
   const artworkModel = overrides.artworkModel ?? createGemini('artworkFeature', gemini);
+  const detector =
+    overrides.detector ??
+    (await createRuntimeDetector(kb, process.env, {
+      onModelEvent: (e) =>
+        logger.warn('crisis.model_unavailable', {
+          layer: e.layer,
+          kind: e.kind,
+          ...(e.reason ? { reason: e.reason } : {}),
+        }),
+    }));
 
   return {
     db,
@@ -66,6 +80,7 @@ export async function createRuntime(
     publisher,
     model,
     artworkModel,
+    detector,
     logger,
     now: overrides.now ?? (() => new Date()),
   };

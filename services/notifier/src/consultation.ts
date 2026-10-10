@@ -97,8 +97,16 @@ async function readReason(deps: NotifierDeps, c: Child, assessmentId: string): P
   const snap = await deps.db
     .doc(`${childDocPath(c.familyId, c.childId)}/riskAssessments/${assessmentId}`)
     .get();
-  const exp = snap.data()?.['explanation'] as { domains?: string[]; days?: number } | undefined;
-  return { domains: exp?.domains ?? [], days: exp?.days ?? 0 };
+  const exp = snap.data()?.['explanation'] as
+    { domains?: string[]; days?: number; explicit?: boolean } | undefined;
+  const domains = exp?.domains ?? [];
+  // 明示的な申告の days=1 は出来事の印であり、観測された傾向の継続日数ではない
+  const recordedDays = exp?.days ?? 0;
+  const days =
+    !exp?.explicit && domains.length > 0 && Number.isInteger(recordedDays) && recordedDays > 0
+      ? recordedDays
+      : 0;
+  return { domains, days };
 }
 
 // 静的フォールバック：{days} を含む段落は「変化」を表す。根拠がないときは段落ごと省く
@@ -164,6 +172,8 @@ async function sendCareHint(
   if (!draft.templateId) {
     const childSummary = draft.payload?.childSummary ?? null;
     const reason = await readReason(deps, child, consult.assessmentId);
+    const raw = await loadTemplate(kb, 'care_hint');
+    const factual = staticCareHint(raw, child.nickname, reason.days);
     const written = await writeCareHint({
       kb,
       model: deps.model,
@@ -171,9 +181,9 @@ async function sendCareHint(
       gradeBand: child.gradeBand,
       reason,
       childSummary,
+      facts: { title: factual.title, changes: factual.changes, meaning: factual.meaning },
     });
-    const raw = await loadTemplate(kb, 'care_hint');
-    const body = written.ok ? written.value : staticCareHint(raw, child.nickname, reason.days);
+    const body = written.ok ? written.value : factual;
     if (!written.ok) {
       logger.warn('notify.writer_fallback', {
         notificationId,

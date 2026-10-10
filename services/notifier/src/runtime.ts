@@ -12,7 +12,14 @@ import {
   type TaskQueue,
 } from '@ijime/service-kit';
 
-import { FcmSender, LogOnlySender, MemorySender } from './channels.js';
+import {
+  FcmSender,
+  GmailSender,
+  gmailCredentialsSchema,
+  LogOnlySender,
+  MemorySender,
+  type ChannelSender,
+} from './channels.js';
 import type { NotifierDeps } from './deps.js';
 import {
   BigQueryDailyFeatures,
@@ -24,6 +31,21 @@ function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`missing env ${name}`);
   return v;
+}
+
+// 送信用の認証情報は本番環境でのみ Secret Manager から注入する（GMAIL_CREDENTIALS）。ローカルとテストでは Gmail を呼び出さない
+function emailSender(prod: boolean, logger: Logger): ChannelSender {
+  const raw = process.env['GMAIL_CREDENTIALS'];
+  if (!prod || !raw) return new LogOnlySender('email', logger);
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new Error('GMAIL_CREDENTIALS is not valid JSON');
+  }
+  const creds = gmailCredentialsSchema.safeParse(json);
+  if (!creds.success) throw new Error('GMAIL_CREDENTIALS is missing required fields');
+  return new GmailSender(creds.data, logger);
 }
 
 export async function createRuntime(overrides: Partial<NotifierDeps> = {}): Promise<NotifierDeps> {
@@ -50,7 +72,7 @@ export async function createRuntime(overrides: Partial<NotifierDeps> = {}): Prom
 
   const senders = overrides.senders ?? {
     webpush: prod ? new FcmSender(env.GCP_PROJECT_ID!, new AdcGoogleHttp()) : new MemorySender(),
-    email: new LogOnlySender('email', logger),
+    email: emailSender(prod, logger),
     sms: new LogOnlySender('sms', logger),
   };
 

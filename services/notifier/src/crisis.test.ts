@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Firestore } from '@google-cloud/firestore';
+import { FieldValue, Firestore } from '@google-cloud/firestore';
 import { ScriptedLlm } from '@ijime/agent-core';
+import type { CrisisHitCategory } from '@ijime/api-types';
 import { crisis as crisisConfig } from '@ijime/config';
 import { FsKbSource, Kb } from '@ijime/kb-loader';
 import { encodePushEnvelope, Logger, MemoryTaskQueue, type TaskSpec } from '@ijime/service-kit';
@@ -62,11 +63,13 @@ async function seedCrisis(
   childId: string,
   crisisId: string,
   familyHarmSuspected: boolean,
+  category: CrisisHitCategory = familyHarmSuspected ? 'family_harm' : 'self_harm',
 ): Promise<void> {
   await db.doc(`families/${familyId}/children/${childId}/crisisEvents/${crisisId}`).set({
     triggerType: 'text',
     sourceRef: `families/${familyId}/children/${childId}/sessions/s/messages/m`,
-    detection: { keywordMatched: true, method: 'keyword', category: 'suicidal', confidence: 1 },
+    detection: { keywordMatched: true, method: 'keyword', category, confidence: 1 },
+    category,
     familyHarmSuspected,
     timeline: [{ step: 'safe_mode_shown', at: new Date() }],
     status: 'open',
@@ -112,6 +115,7 @@ function setup() {
     return codes;
   };
   return {
+    deps,
     lines,
     tasks,
     webpush,
@@ -123,8 +127,12 @@ function setup() {
   };
 }
 
-const crisisEvent = (childId: string, crisisId: string, familyHarmSuspected = false) =>
-  encodePushEnvelope({ childId, crisisId, familyHarmSuspected });
+const crisisEvent = (
+  childId: string,
+  crisisId: string,
+  familyHarmSuspected = false,
+  category: CrisisHitCategory = familyHarmSuspected ? 'family_harm' : 'self_harm',
+) => encodePushEnvelope({ childId, crisisId, category, familyHarmSuspected });
 
 async function readNotification(
   familyId: string,
@@ -134,7 +142,7 @@ async function readNotification(
     NotificationDoc | undefined;
 }
 
-describe('S1 text crisis → notify all guardians, resend until acknowledged', () => {
+describe('S1 text crisis → primary guardian first, resend to all until acknowledged', () => {
   it('runs the whole escalation loop', async () => {
     const [f, c, k] = ['f_s1', 'c_s1', 'k_s1'];
     await seedFamily(f, c);
@@ -148,7 +156,7 @@ describe('S1 text crisis → notify all guardians, resend until acknowledged', (
       childId: c,
       kind: 'crisis',
       level: 'l4',
-      recipientIds: ['g1', 'g2'],
+      recipientIds: ['g1'],
       channels: ['webpush', 'email', 'sms'],
       status: 'queued',
     });
@@ -160,8 +168,10 @@ describe('S1 text crisis → notify all guardians, resend until acknowledged', (
     expect(crisisDoc.notificationId).toBe(nid);
     expect(crisisDoc.timeline.map((e) => e.step)).toContain('guardian_notified');
 
+    // 初回は主保護者 g1 にだけ送る
     const sends = t.tasks.take('notify-send');
-    expect(sends).toHaveLength(4);
+    expect(sends).toHaveLength(3);
+    expect(new Set(sends.map((s) => s.body['guardianId']))).toEqual(new Set(['g1']));
     const esc = t.tasks.take('crisis-escalation');
     expect(esc).toHaveLength(1);
     expect(esc[0]!.delaySeconds).toBe(crisisConfig.guardianAckTimeoutMinutes * 60);
@@ -172,24 +182,28 @@ describe('S1 text crisis → notify all guardians, resend until acknowledged', (
     const all = await db.collection(`families/${f}/notifications`).get();
     expect(all.size).toBe(1);
 
-    expect(await t.run(sends)).toEqual([204, 204, 204, 204]);
+    expect(await t.run(sends)).toEqual([204, 204, 204]);
     expect(t.webpush.sent).toHaveLength(1);
     expect(t.webpush.sent[0]!.msg).toMatchObject({
       pushTitle: '緊急：お子さんの安全に関するお知らせ',
       pushBody: '新しいお知らせがあります。アプリで確認してください。',
     });
-    expect(t.email.sent.map((s) => s.guardianId).sort()).toEqual(['g1', 'g2']);
+    expect(t.email.sent.map((s) => s.guardianId)).toEqual(['g1']);
     expect(t.sms.sent.map((s) => s.guardianId)).toEqual(['g1']);
     const afterSend = await readNotification(f, nid);
     expect(afterSend!.status).toBe('sent');
-    expect(afterSend!.attempts).toHaveLength(4);
+    expect(afterSend!.attempts).toHaveLength(3);
 
-    // 規定時間内に確認がない → 再送を1回行い、次回分を登録する
+    // 規定時間内に確認がない → 第二保護者 g2 を加えて再送を1回行い、次回分を登録する
     t.advance(crisisConfig.guardianAckTimeoutMinutes * 60_000);
     expect(await t.run(esc)).toEqual([204]);
     const resends = t.tasks.take('notify-send');
     expect(resends).toHaveLength(4);
     expect(resends.every((r) => r.body['round'] === 1)).toBe(true);
+    expect(resends.map((r) => r.body)).toContainEqual(
+      expect.objectContaining({ guardianId: 'g2', channel: 'email' }),
+    );
+    expect((await readNotification(f, nid))!.recipientIds.sort()).toEqual(['g1', 'g2']);
     const esc2 = t.tasks.take('crisis-escalation');
     expect(esc2).toHaveLength(1);
     expect(esc2[0]!.delaySeconds).toBe(crisisConfig.resendIntervalMinutes * 60);
@@ -209,7 +223,7 @@ describe('S1 text crisis → notify all guardians, resend until acknowledged', (
     expect(await t.run(esc2)).toEqual([204]);
     expect(t.tasks.tasks).toHaveLength(0);
     const final = await readNotification(f, nid);
-    expect(final!.attempts).toHaveLength(4);
+    expect(final!.attempts).toHaveLength(3);
     expect(final!.status).toBe('acknowledged');
 
     const logs = t.lines.join('\n');
@@ -256,6 +270,65 @@ describe('S1 text crisis → notify all guardians, resend until acknowledged', (
     expect(
       (await t.post('/internal/events/crisis-detected', crisisEvent(c, 'k_none'))).status,
     ).toBe(503);
+  });
+});
+
+describe('crisis email and recipients', () => {
+  it('emails only fixed text and the guardian app link, never the nickname', async () => {
+    const [f, c, k] = ['f_mail', 'c_mail', 'k_mail'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    const email = new MemorySender();
+    t.deps.senders.email = email;
+    t.deps.guardianWebOrigin = 'https://guardian.example.jp';
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k));
+    const mail = t.tasks.take('notify-send').filter((s) => s.body['channel'] === 'email');
+    expect(await t.run(mail)).toEqual([204]);
+    const msg = email.sent[0]!.msg;
+    expect(msg.email!.subject).toBe('【緊急】お子さんの安全に関するお知らせ');
+    expect(msg.email!.body).toContain(
+      `https://guardian.example.jp/notifications/${crisisNotificationId(c, k)}`,
+    );
+    expect(msg.email!.body).toContain('119 または 110');
+    expect(JSON.stringify(msg)).not.toContain('はな');
+    expect(JSON.stringify(msg)).not.toContain(SENTINEL);
+  });
+
+  it('without a secondary guardian, resends go to the primary only', async () => {
+    const [f, c, k] = ['f_solo', 'c_solo', 'k_solo'];
+    await seedFamily(f, c);
+    await db.doc(`families/${f}/guardians/g2`).delete();
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k));
+    t.tasks.take('notify-send');
+    expect(await t.run(t.tasks.take('crisis-escalation'))).toEqual([204]);
+    const resends = t.tasks.take('notify-send');
+    expect(new Set(resends.map((r) => r.body['guardianId']))).toEqual(new Set(['g1']));
+  });
+
+  it('a revoked guardian is never notified', async () => {
+    const [f, c, k] = ['f_revoked', 'c_revoked', 'k_revoked'];
+    await seedFamily(f, c);
+    await db.doc(`families/${f}/guardians/g2`).update({ revokedAt: new Date() });
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k));
+    t.tasks.take('notify-send');
+    await t.run(t.tasks.take('crisis-escalation'));
+    expect(t.tasks.take('notify-send').some((r) => r.body['guardianId'] === 'g2')).toBe(false);
+  });
+
+  it('falls back to every guardian when no one is marked primary', async () => {
+    const [f, c, k] = ['f_norole', 'c_norole', 'k_norole'];
+    await seedFamily(f, c);
+    await db.doc(`families/${f}/guardians/g1`).update({ role: FieldValue.delete() });
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k));
+    const first = t.tasks.take('notify-send');
+    expect(new Set(first.map((r) => r.body['guardianId']))).toEqual(new Set(['g1', 'g2']));
   });
 });
 
@@ -424,5 +497,122 @@ describe('S2 family harm suspected → no guardian is notified', () => {
     await t.post('/internal/events/crisis-detected', crisisEvent(c, k, false));
     expect(t.tasks.tasks).toHaveLength(0);
     expect((await db.collection(`families/${f}/notifications`).get()).size).toBe(0);
+  });
+});
+
+describe('crisis categories', () => {
+  it.each(['self_harm', 'violence', 'extortion', 'other'] as const)(
+    '%s notifies the guardians immediately',
+    async (category) => {
+      const [f, c, k] = [`f_cat_${category}`, `c_cat_${category}`, `k_cat_${category}`];
+      await seedFamily(f, c);
+      await seedCrisis(f, c, k, false, category);
+      const t = setup();
+      expect(
+        (await t.post('/internal/events/crisis-detected', crisisEvent(c, k, false, category)))
+          .status,
+      ).toBe(204);
+      expect(await readNotification(f, crisisNotificationId(c, k))).toMatchObject({
+        kind: 'crisis',
+        level: 'l4',
+      });
+      expect(t.tasks.take('notify-send').length).toBeGreaterThan(0);
+    },
+  );
+
+  it('family_harm in the event category alone suppresses the notification', async () => {
+    const [f, c, k] = ['f_cat_fh', 'c_cat_fh', 'k_cat_fh'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false, 'other');
+    const t = setup();
+    await t.post(
+      '/internal/events/crisis-detected',
+      encodePushEnvelope({
+        childId: c,
+        crisisId: k,
+        category: 'family_harm',
+        familyHarmSuspected: false,
+      }),
+    );
+    expect(t.tasks.tasks).toHaveLength(0);
+    expect((await db.collection(`families/${f}/notifications`).get()).size).toBe(0);
+  });
+
+  it('an agent-reported crisis is no longer treated as family harm by default', async () => {
+    const [f, c, k] = ['f_cat_agent', 'c_cat_agent', 'k_cat_agent'];
+    await seedFamily(f, c);
+    await db.doc(`families/${f}/children/${c}/crisisEvents/${k}`).set({
+      triggerType: 'text',
+      sourceRef: `families/${f}/children/${c}/sessions/s`,
+      detection: { source: 'agent_tool', category: 'violence' },
+      category: 'violence',
+      familyHarmSuspected: false,
+      timeline: [{ step: 'agent_escalate', at: new Date() }],
+      status: 'open',
+      createdAt: new Date(),
+    });
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k, false, 'violence'));
+    expect(await readNotification(f, crisisNotificationId(c, k))).toBeDefined();
+  });
+
+  it('a crisis found on recheck leads with the fixed delay line (event flag)', async () => {
+    const [f, c, k] = ['f_delay_ev', 'c_delay_ev', 'k_delay_ev'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post(
+      '/internal/events/crisis-detected',
+      encodePushEnvelope({
+        childId: c,
+        crisisId: k,
+        category: 'self_harm',
+        familyHarmSuspected: false,
+        delayed: true,
+      }),
+    );
+    const n = await readNotification(f, crisisNotificationId(c, k));
+    expect(n!.payload.meaning.split('\n')[0]).toBe(
+      'システムの一時的な不具合のため、このお知らせは少し遅れて届いています。',
+    );
+  });
+
+  it('a crisis found on recheck leads with the delay line (stored record only)', async () => {
+    const [f, c, k] = ['f_delay_rec', 'c_delay_rec', 'k_delay_rec'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    await db
+      .doc(`families/${f}/children/${c}/crisisEvents/${k}`)
+      .update({ 'detection.delayed': true });
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k, false));
+    const n = await readNotification(f, crisisNotificationId(c, k));
+    expect(n!.payload.meaning).toContain('少し遅れて届いています');
+  });
+
+  it('an on-time crisis has no delay line', async () => {
+    const [f, c, k] = ['f_delay_none', 'c_delay_none', 'k_delay_none'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k, false));
+    const n = await readNotification(f, crisisNotificationId(c, k));
+    expect(n!.payload.meaning).not.toContain('遅れて');
+  });
+
+  it('accepts events from publishers that predate the category field', async () => {
+    const [f, c, k] = ['f_cat_legacy', 'c_cat_legacy', 'k_cat_legacy'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    expect(
+      (
+        await t.post(
+          '/internal/events/crisis-detected',
+          encodePushEnvelope({ childId: c, crisisId: k, familyHarmSuspected: false }),
+        )
+      ).status,
+    ).toBe(204);
+    expect(await readNotification(f, crisisNotificationId(c, k))).toBeDefined();
   });
 });

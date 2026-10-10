@@ -22,6 +22,7 @@ beforeAll(async () => {
     detector: createNoModelDetector(await kb.yaml('lexicon/ja.yaml', lexiconSchema)),
     publish: async () => {},
     countMorae: async () => 0,
+    requestRecheck: async () => {},
   };
 });
 

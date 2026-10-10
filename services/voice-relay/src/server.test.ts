@@ -5,6 +5,7 @@ import { Logger } from '@ijime/service-kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
+import { VoiceOpenError } from './backend.js';
 import { attachVoiceServer } from './server.js';
 import { ResumableGemini } from './live.js';
 
@@ -45,6 +46,41 @@ it('Tokyo Live rejection sends only the text-fallback end frame, never ready or 
     await voice.closeAll();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+describe('refused sessions', () => {
+  it.each([
+    ['daily_limit', 'limit'],
+    ['voice_disabled', 'unavailable'],
+    ['active_crisis', 'error'],
+  ] as const)('maps %s to end reason %s', async (refusal, reason) => {
+    const messages: unknown[] = [];
+    const server = createServer();
+    const voice = attachVoiceServer(server, {
+      logger: new Logger('voice-relay', () => {}),
+      backend: {
+        redeem: async () => ({ childId: 'c1', familyId: 'f1' }),
+        open: async () => {
+          throw new VoiceOpenError(refusal);
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/voice?ticket=test`);
+        ws.on('error', reject);
+        ws.on('open', () => ws.send(JSON.stringify({ type: 'start', sampleRateHz: 16000 })));
+        ws.on('message', (data) => messages.push(JSON.parse(String(data))));
+        ws.on('close', () => resolve());
+      });
+      expect(messages).toEqual([{ type: 'end', reason }]);
+    } finally {
+      await voice.closeAll();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe('voice error log redaction', () => {

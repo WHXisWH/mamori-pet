@@ -1,5 +1,5 @@
 import type { PetToolExecutor, TurnContext } from '@ijime/agent-core';
-import type { CrisisReason, ToolCallReq, ToolCallRes } from '@ijime/api-types';
+import type { CrisisHitCategory, ToolCallReq, ToolCallRes } from '@ijime/api-types';
 import { voice as voiceConfig } from '@ijime/config';
 
 export type ToolCaller = (toolName: string, req: ToolCallReq) => Promise<unknown>;
@@ -28,7 +28,7 @@ export function httpToolCaller(
 // 音声モードのツール実行器：すべて pet-agent に転送する。escalate_crisis だけはローカルで危機の中断処理を行う
 export function forwardingExecutor(
   call: ToolCaller,
-  escalate: (reason: CrisisReason) => Promise<{ crisisId: string }>,
+  escalate: (category: CrisisHitCategory) => Promise<{ crisisId: string }>,
   mayWrite: () => boolean,
 ): PetToolExecutor {
   const req = (ctx: TurnContext, args: Record<string, unknown>): ToolCallReq => ({
@@ -62,6 +62,6 @@ export function forwardingExecutor(
       (await write('start_tell_adult', ctx, reason === undefined ? {} : { reason })) as {
         consultationId: string;
       },
-    escalateCrisis: (_ctx, reason) => escalate(reason),
+    escalateCrisis: (_ctx, category) => escalate(category),
   };
 }
