@@ -10,6 +10,7 @@ import { createApp as createRiskApp } from '@ijime/risk-engine/src/app.js';
 import { addDays } from '@ijime/risk-engine/src/daily/calendar.js';
 import { MemoryFeatureStore } from '@ijime/risk-engine/src/daily/feature-store.js';
 import { runDailyJob } from '@ijime/risk-engine/src/daily/job.js';
+import { MemoryExternalChildData } from '@ijime/risk-engine/src/deletion.js';
 import {
   encodePushEnvelope,
   Logger,
@@ -86,6 +87,7 @@ async function world(childId: string) {
       tasks: riskTasks,
       logger,
       notifierUrl: 'http://notifier.test',
+      external: new MemoryExternalChildData(),
       now: () => now,
     }),
     logger,
@@ -260,6 +262,7 @@ describe('end-to-end scenarios', () => {
         store,
         logger: new Logger('e2e', () => {}),
         notifierUrl: 'http://notifier.test',
+        external: new MemoryExternalChildData(),
         now: () => new Date('2026-11-20T18:00:00Z'),
       },
       D,
