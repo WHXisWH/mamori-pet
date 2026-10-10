@@ -18,6 +18,11 @@ beforeAll(() => {
     },
     allowedOrigins: [],
     guardian: async () => ({ db, auth: { allowDevHeader: true } }),
+    guardianDeletion: async () => ({
+      db,
+      auth: { allowDevHeader: true },
+      publish: vi.fn(async () => {}),
+    }),
   });
 });
 afterAll(() => db.terminate());
@@ -26,14 +31,15 @@ async function seed(membership: Record<string, unknown> = { role: 'primary' }) {
   const suffix = randomUUID().replaceAll('-', '');
   const familyId = `f_${suffix}`;
   const guardianId = `g_${suffix}`;
+  const childId = `c_${suffix}`;
   const root = db.doc(`families/${familyId}`);
   const member = root.collection('guardians').doc(guardianId);
-  const child = root.collection('children').doc('c1');
+  const child = root.collection('children').doc(childId);
   const notification = root.collection('notifications').doc('n1');
   const crisis = child.collection('crisisEvents').doc('k1');
   await root.set({ status: 'active' });
   await member.set({ guardianId, ...membership });
-  await child.set({ status: 'active' });
+  await child.set({ childId, familyId, status: 'active' });
   await crisis.set({
     status: 'open',
     familyHarmSuspected: false,
@@ -41,7 +47,7 @@ async function seed(membership: Record<string, unknown> = { role: 'primary' }) {
     timeline: [],
   });
   await notification.set({
-    childId: 'c1',
+    childId,
     recipientIds: [guardianId],
     kind: 'crisis',
     status: 'queued',
@@ -51,6 +57,8 @@ async function seed(membership: Record<string, unknown> = { role: 'primary' }) {
   return {
     familyId,
     guardianId,
+    childId,
+    child,
     member,
     notification,
     crisis,
@@ -109,6 +117,17 @@ describe('guardian membership authorization', () => {
       ).toBe(200);
     },
   );
+
+  it('lets an authenticated guardian request deletion only for a child in the same family', async () => {
+    const f = await seed({ role: 'primary', status: 'active' });
+    const response = await app.request(`/v1/children/${f.childId}/data-deletion-requests`, {
+      method: 'POST',
+      headers: f.headers,
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ status: 'accepted' });
+    expect((await f.child.get()).get('status')).toBe('deleting');
+  });
 
   it.each([
     ['list', '/v1/notifications', 'GET', 1],

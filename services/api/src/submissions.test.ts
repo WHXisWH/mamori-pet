@@ -4,7 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { Firestore } from '@google-cloud/firestore';
 import { DevChildDirectory, FirestoreSessionService, ScriptedLlm } from '@ijime/agent-core';
 import type { ArtworkRes, HomeCheckinRes, IslandRes, MoodRes } from '@ijime/api-types';
-import { FsKbSource, Kb } from '@ijime/kb-loader';
+import {
+  createNoModelDetector,
+  CrisisDetector,
+  KeywordMatcher,
+  ModelCallError,
+} from '@ijime/crisis-detector';
+import { FsKbSource, Kb, lexiconSchema } from '@ijime/kb-loader';
 import { encodePushEnvelope, Logger, MemoryPublisher } from '@ijime/service-kit';
 import { createApp as createSignalWorkerApp } from '@ijime/signal-worker/src/app.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -70,6 +76,7 @@ beforeAll(async () => {
       publisher: new MemoryPublisher(),
       model: swLlm,
       artworkModel: swLlm,
+      detector: createNoModelDetector(await kb.yaml('lexicon/ja.yaml', lexiconSchema)),
       logger,
       now: () => new Date(),
     }),
@@ -273,7 +280,11 @@ describe('POST /v1/child/artworks', () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as ArtworkRes;
     expect(body.crisis?.message).toBeTruthy();
-    expect(body.crisis?.resources.map((r) => r.id).sort()).toEqual(['childline', 'sos_dial']);
+    expect(body.crisis?.resources.map((r) => r.id).sort()).toEqual([
+      'childline',
+      'emergency',
+      'sos_dial',
+    ]);
     expect(featureCalls).toHaveLength(0);
 
     const path = await base('c_sub_art3');
@@ -293,10 +304,56 @@ describe('POST /v1/child/artworks', () => {
         payload: {
           childId: 'c_sub_art3',
           crisisId: body.crisis!.crisisId,
+          category: 'other',
           familyHarmSuspected: false,
         },
       },
     ]);
+  });
+
+  it('rejects an unmatched narrative with 503 and the fixed reply when models are down, storing nothing', async () => {
+    const quota = async () => {
+      throw new ModelCallError('quota');
+    };
+    const rt = await createApiRuntime({
+      kb: await Kb.load(new FsKbSource(KB_DIR)),
+      db,
+      directory,
+      logger: new Logger('test', (l) => logLines.push(l)),
+      publish: async (topic, payload) => void published.push({ topic, payload }),
+      auth: { allowDevHeader: true },
+      images,
+      artworkFeatures: async (req) => void featureCalls.push(req),
+      detector: new CrisisDetector(
+        new KeywordMatcher(['死にたい']),
+        { screen: quota },
+        { review: quota },
+        { screenTimeoutMs: 200, reviewTimeoutMs: 200, random: () => 0 },
+      ),
+    });
+    const down = createApp({
+      getKb: async () => rt.kb,
+      allowedOrigins: [],
+      submissions: async () => rt.submissions,
+    });
+    const res = await down.request('/v1/child/artworks', {
+      method: 'POST',
+      headers: H('c_sub_art_down'),
+      body: artworkForm({
+        type: 'story',
+        narrativeText: SENTINEL,
+        narrativeMode: 'typed',
+        save: 'false',
+      }),
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'MODEL_UNAVAILABLE', message: rt.chat.pausedReplies.high },
+    });
+    const artworks = await db.collection(`${await base('c_sub_art_down')}/artworks`).get();
+    expect(artworks.size).toBe(0);
+    expect(featureCalls).toHaveLength(0);
+    expect(published).toEqual([]);
   });
 
   it('still succeeds when signal-worker fails, and rejects bad images and fields', async () => {

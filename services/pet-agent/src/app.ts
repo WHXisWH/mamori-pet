@@ -1,18 +1,27 @@
-import type { PetAction, TurnChunk, TurnReq } from '@ijime/api-types';
+import { type PetAction, type TurnChunk, type TurnReq } from '@ijime/api-types';
 import {
   createPetTools,
   petToolSchemas,
   PET_TOOL_NAMES,
   SAFETY_TOOLS,
   runPetTurn,
+  withChildScope,
   type PetToolName,
 } from '@ijime/agent-core';
-import { ApiHttpError, createServiceApp, type ServiceApp } from '@ijime/service-kit';
+import {
+  ApiHttpError,
+  createServiceApp,
+  proactiveTurnTaskSchema,
+  type ServiceApp,
+} from '@ijime/service-kit';
 import { stream } from 'hono/streaming';
+import { loadQuickReplyCatalog } from '@ijime/kb-loader';
 import { z } from 'zod';
 
 import { buildAgent, type PetRuntime } from './runtime.js';
 import { assertSession, reserveHttpToolCall } from './executor.js';
+import { maybeWriteAgentSummary } from './summary.js';
+import { runProactiveTurn } from './proactive.js';
 
 export const SERVICE_NAME = 'pet-agent';
 
@@ -37,6 +46,7 @@ export function createApp(runtime: () => Promise<PetRuntime>): ServiceApp {
         () => false,
       ),
   });
+  app.use('*', (_c, next) => withChildScope(next));
 
   app.post('/internal/turns', async (c) => {
     const parsed = turnReqSchema.safeParse(await c.req.json().catch(() => null));
@@ -82,6 +92,7 @@ export function createApp(runtime: () => Promise<PetRuntime>): ServiceApp {
         sessionService: rt.sessions,
         childId: req.childId,
         sessionId: req.sessionId,
+        messageId: req.messageId,
         text: message.text,
         gradeBand: child.gradeBand,
         filter: rt.filter,
@@ -99,6 +110,23 @@ export function createApp(runtime: () => Promise<PetRuntime>): ServiceApp {
           await s.write(JSON.stringify(chunk) + '\n');
           r = await gen.next();
         }
+        if (r.done && crises.length === 0 && r.value.fallback === null) {
+          try {
+            await maybeWriteAgentSummary(
+              rt.db,
+              rt.sessions,
+              child,
+              req.sessionId,
+              new Date(),
+              rt.summarize,
+            );
+          } catch {
+            log.warn('agent.summary_write_failed', {
+              pseudoId: child.childId,
+              sessionId: req.sessionId,
+            });
+          }
+        }
         if (crises.length > 0) {
           const chunk: TurnChunk = { type: 'crisis', crisisId: crises[0]! };
           await s.write(JSON.stringify(chunk) + '\n');
@@ -108,6 +136,13 @@ export function createApp(runtime: () => Promise<PetRuntime>): ServiceApp {
         c.req.raw.signal.removeEventListener('abort', onClientAbort);
       }
     });
+  });
+
+  app.post('/internal/proactive-turns', async (c) => {
+    const parsed = proactiveTurnTaskSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiHttpError('INVALID_ARGUMENT', 'invalid proactive turn');
+    const rt = await runtime();
+    return c.json(await runProactiveTurn(rt, parsed.data));
   });
 
   app.post('/internal/tools/:toolName', async (c) => {
@@ -148,8 +183,26 @@ export function createApp(runtime: () => Promise<PetRuntime>): ServiceApp {
     };
     if (!(await reserveHttpToolCall(rt.db, child, ctx, name, args.data)))
       return c.json({ result: { error: 'tool_budget_exhausted' } });
+    let currentUserText: string | undefined;
+    if (name === 'offer_quick_replies' && child.gradeBand !== 'low' && lastMessage.docs[0]) {
+      const context = await rt.sessions.readMessageContext(
+        child.childId,
+        body.sessionId,
+        lastMessage.docs[0].id,
+        0,
+      );
+      const message = context?.message;
+      if (
+        message?.role === 'child' &&
+        message.crisisCheck?.hit === false &&
+        !message.crisisCheck.pendingReview
+      )
+        currentUserText = message.text;
+    }
     const tool = createPetTools(executor, ctx, (action) => actions.push(action), undefined, {
       filter: rt.filter,
+      quickReplyCatalog: await loadQuickReplyCatalog(rt.kb),
+      ...(currentUserText !== undefined ? { currentUserText } : {}),
     }).find((candidate) => candidate.name === name)!;
     try {
       const result = await tool.runAsync({ args: args.data, toolContext: {} as never });

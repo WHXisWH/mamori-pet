@@ -101,9 +101,13 @@ describe('real literature-reviewed conversation content (not model or clinical e
     const charter = await kb.text('prompts/charter.md');
     expect(
       instruction.startsWith(
-        charter.replace('{petName}', defaultPetName(input.characterId)).trim(),
+        charter
+          .replaceAll('{petName}', defaultPetName(input.characterId))
+          .replaceAll('{replyMaxChars}', String(agent.replyMaxChars[input.gradeBand]))
+          .trim(),
       ),
     ).toBe(true);
+    expect(instruction).not.toMatch(/\{petName\}|\{replyMaxChars\}/);
     expect(instruction).toContain(
       (await kb.text(`prompts/persona/${input.characterId}.md`)).trim(),
     );

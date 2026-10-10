@@ -3,18 +3,28 @@ import type { CrisisPayload } from '@ijime/api-types';
 import {
   crisisEventDoc,
   crisisResponse,
+  isPaused,
+  routingOfCheck,
   type CrisisCheck,
   type CrisisTrigger,
 } from '@ijime/crisis-detector';
 import { ApiHttpError } from '@ijime/service-kit';
 
-import { checkWithinBudget } from '../model-budget.js';
+import { checkWithinBudget, rejectPaused } from '../model-budget.js';
 import { persistSubmission } from '../submission-store.js';
 import type { SubmissionDeps } from './submissions.js';
 
 export type GuardDeps = Pick<
   SubmissionDeps,
-  'db' | 'directory' | 'detector' | 'safeModeCopy' | 'hotlines' | 'logger' | 'publish' | 'now'
+  | 'db'
+  | 'directory'
+  | 'detector'
+  | 'safeModeCopy'
+  | 'hotlines'
+  | 'pausedReplies'
+  | 'logger'
+  | 'publish'
+  | 'now'
 >;
 
 export async function submissionOwner(deps: GuardDeps, childId: string) {
@@ -26,7 +36,8 @@ export async function submissionOwner(deps: GuardDeps, childId: string) {
   return { child, base: childPath(child.familyId, childId), sources };
 }
 
-// 語りは子どもの入力なので、先に危機検知を通す。検知のタイムアウトやエラーは、検知器がヒットとして扱う
+// 語りは子どもの入力なので、先に危機検知を通す。キーワードがヒットした場合はモデルが使えなくても危機として扱う。
+// ヒットせず、モデルの結論も得られないときはこの提出を拒否し、子どもに再提出してもらう
 export async function checkNarrative(
   deps: GuardDeps,
   child: ChildRecord,
@@ -46,6 +57,7 @@ export async function checkNarrative(
     category: check.category,
     latencyMs: Math.round(check.latencyMs),
   });
+  if (isPaused(check)) rejectPaused(deps.pausedReplies[child.gradeBand]);
   return check;
 }
 
@@ -64,17 +76,13 @@ export async function raiseCrisis(
     ref,
     crisisEventDoc({ triggerType, sourceRef, check, now: deps.now() }),
   );
-  await deps.publish('crisis.detected', {
-    childId: child.childId,
-    crisisId: ref.id,
-    familyHarmSuspected: check.familyHarmSuspected,
-  });
+  const routing = routingOfCheck(check);
+  await deps.publish('crisis.detected', { childId: child.childId, crisisId: ref.id, ...routing });
   deps.logger.warn('crisis.detected', {
     pseudoId: child.childId,
     crisisId: ref.id,
     source: triggerType,
-    category: check.category,
-    familyHarmSuspected: check.familyHarmSuspected,
+    ...routing,
   });
   const { message, resources } = crisisResponse({
     familyHarmSuspected: check.familyHarmSuspected,

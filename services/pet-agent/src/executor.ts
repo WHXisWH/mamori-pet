@@ -3,7 +3,8 @@ import { createHmac } from 'node:crypto';
 import { FieldValue, type Firestore, type Transaction } from '@google-cloud/firestore';
 import {
   childPath,
-  SAFETY_TOOLS,
+  rankMemories,
+  BUDGETED_TOOLS,
   type ChildRecord,
   type FirestoreSessionService,
   type PetToolExecutor,
@@ -16,6 +17,8 @@ import { ApiHttpError, type Logger, type Publisher } from '@ijime/service-kit';
 import { gamePromptsFor, loadGames, type GameCatalog, type Kb } from '@ijime/kb-loader';
 
 import { asDate, consultationPending, jstParts, readChildContext } from './context.js';
+import { createMemorySanitizer, type NameDetector } from './pseudonyms.js';
+import { recallableMemory, type MemorySearch } from './memory-search.js';
 
 export async function assertSession(
   db: Firestore,
@@ -45,7 +48,7 @@ export async function reserveHttpToolCall(
   name: PetToolName,
   args: unknown,
 ): Promise<boolean> {
-  if (SAFETY_TOOLS.has(name)) return true;
+  if (!BUDGETED_TOOLS.has(name)) return true;
   const hash = (value: unknown) =>
     createHmac('sha256', child.dek).update(JSON.stringify(value)).digest('hex');
   const ref = db.doc(
@@ -81,11 +84,14 @@ export function createExecutor(input: {
   logger: Logger;
   publish: Publisher['publish'];
   onCrisis?: (id: string) => void;
+  detectNames?: NameDetector;
+  searchMemory?: MemorySearch;
 }): PetToolExecutor {
   const { db, child, sessions, sessionId } = input;
   const base = childPath(child.familyId, child.childId);
   let gamesCache: Promise<GameCatalog> | undefined;
   const sessionRef = db.doc(`${base}/sessions/${sessionId}`);
+  const sanitizeMemory = createMemorySanitizer(input);
   const verify = (ctx: TurnContext) => {
     if (ctx.childId !== child.childId || ctx.sessionId !== sessionId)
       throw new ApiHttpError('PERMISSION_DENIED', 'tool context mismatch');
@@ -112,7 +118,14 @@ export function createExecutor(input: {
       const openCrisis = safety
         ? undefined
         : await tx.get(
-            db.collection(`${base}/crisisEvents`).where('status', '==', 'open').limit(1),
+            db
+              .collection(`${base}/crisisEvents`)
+              .where(
+                'status',
+                'in',
+                name === 'start_tell_adult' ? ['open', 'guardian_acknowledged'] : ['open'],
+              )
+              .limit(1),
           );
       if (!owner.exists || owner.get('status') !== 'active' || !session.exists)
         throw new ApiHttpError('NOT_FOUND', 'unknown active session');
@@ -138,10 +151,15 @@ export function createExecutor(input: {
     });
   };
   return {
+    prepareMemory: async (ctx, content) => {
+      verify(ctx);
+      await assertSession(db, child, sessionId);
+      return sanitizeMemory(content);
+    },
     getChildContext: async (ctx) => {
       verify(ctx);
       await assertSession(db, child, sessionId);
-      return readChildContext(db, input.kb, child);
+      return readChildContext(db, input.kb, child, new Date(), sessions);
     },
     searchSkill: async (ctx, query) => {
       verify(ctx);
@@ -169,11 +187,14 @@ export function createExecutor(input: {
         throw new Error('checkin_publish_failed');
       }
     },
-    remember: async (ctx, content, category) =>
-      atomic(ctx, 'remember', [content, category], false, async (tx, id) => {
+    remember: async (ctx, content, category) => {
+      verify(ctx);
+      await assertSession(db, child, sessionId);
+      const sanitized = await sanitizeMemory(content);
+      return atomic(ctx, 'remember', [sanitized, category], false, async (tx, id) => {
         const path = `${base}/memoryProposals`;
         tx.create(db.doc(`${path}/${id}`), {
-          contentEnc: sessions.encryptForChild(child, content, `${path}#contentEnc`),
+          contentEnc: sessions.encryptForChild(child, sanitized, `${path}#contentEnc`),
           category,
           status: 'pending',
           characterId: child.characterId,
@@ -182,54 +203,56 @@ export function createExecutor(input: {
           expiresAt: new Date(Date.now() + retention.idempotencyKeyHours * 3_600_000),
         });
         return { proposalId: id, status: 'pending' as const };
-      }),
+      });
+    },
     recall: async (ctx, topic) => {
       verify(ctx);
       await assertSession(db, child, sessionId);
+      if (input.searchMemory) {
+        let recalled: string[] | undefined;
+        try {
+          recalled = await input.searchMemory(child, await sanitizeMemory(topic));
+        } catch {
+          input.logger.warn('memory_search_unavailable');
+        }
+        await assertSession(db, child, sessionId);
+        if (recalled !== undefined) return recalled.slice(0, agent.recallMaxMemories);
+      }
       const path = `${base}/memories`;
-      const snap = await db
-        .collection(path)
-        .orderBy('createdAt', 'desc')
-        .limit(agent.contextHistoryTurns * agent.recallMaxMemories)
-        .get();
-      const terms = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(topic)]
-        .filter(
-          (part) =>
-            (part.isWordLike &&
-              /\p{Script=Han}|\p{Script=Katakana}|[a-zA-Z0-9]/u.test(part.segment)) ||
-            (part.isWordLike && part.segment.length > 1),
+      const snap = await db.runTransaction(async (tx) => {
+        const [owner, pet] = await tx.getAll(db.doc(base), db.doc(`${base}/pets/${child.petId}`));
+        if (
+          !owner?.exists ||
+          owner.get('status') !== 'active' ||
+          owner.get('childId') !== child.childId ||
+          owner.get('familyId') !== child.familyId ||
+          (owner.get('activePetId') && owner.get('activePetId') !== child.petId) ||
+          !pet?.exists ||
+          pet.get('active') !== true ||
+          pet.get('characterId') !== child.characterId
         )
-        .map((part) => part.segment.toLowerCase());
-      if (terms.length === 0) return [];
+          return undefined;
+        return tx.get(
+          db
+            .collection(path)
+            .orderBy('createdAt', 'desc')
+            .limit(agent.contextHistoryTurns * agent.recallMaxMemories),
+        );
+      });
+      if (!snap) return [];
       const now = new Date();
-      return snap.docs
-        .flatMap((doc) => {
-          const data = doc.data();
-          if (
-            data['deletedAt'] ||
-            data['status'] === 'pending' ||
-            data['status'] === 'rejected' ||
-            (!data['consentedAt'] &&
-              !data['consentAt'] &&
-              !data['acceptedAt'] &&
-              data['status'] !== 'accepted') ||
-            data['characterId'] !== child.characterId ||
-            (data['petId'] && data['petId'] !== child.petId) ||
-            (asDate(data['expiresAt']) ?? asDate(data['expireAt']) ?? new Date(8640000000000000)) <=
-              now
-          )
-            return [];
-          const text = sessions.decryptForChild(
-            child,
-            Buffer.from(data['contentEnc']),
-            `${path}#contentEnc`,
-          );
-          const score = terms.filter((term) => text.toLowerCase().includes(term)).length;
-          return score > 0 ? [{ text, score }] : [];
-        })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, agent.recallMaxMemories)
-        .map((m) => m.text);
+      const candidates = snap.docs.flatMap((doc) => {
+        const data = doc.data();
+        if (!recallableMemory(data, child, now)) return [];
+        const text = sessions.decryptForChild(
+          child,
+          Buffer.from(data['contentEnc']),
+          `${path}#contentEnc`,
+        );
+        const createdAt = asDate(data['createdAt']);
+        return [{ text, ...(createdAt ? { createdAt } : {}) }];
+      });
+      return rankMemories(topic, candidates, agent.recallMaxMemories).map((m) => m.text);
     },
     suggestGame: async (ctx, game) => {
       if (!PET_REQUEST_TYPES.includes(game as PetRequestType)) return false;
@@ -275,8 +298,8 @@ export function createExecutor(input: {
       });
       return result.allowed ? { requestId: result.requestId } : false;
     },
-    startTellAdult: async (ctx) =>
-      atomic(ctx, 'start_tell_adult', {}, false, async (tx, id) => {
+    startTellAdult: async (ctx) => {
+      const result = await atomic(ctx, 'start_tell_adult', {}, false, async (tx, id) => {
         const candidates = await tx.get(
           db
             .collection(`${base}/consultations`)
@@ -284,15 +307,20 @@ export function createExecutor(input: {
             .limit(agent.contextHistoryTurns),
         );
         const now = new Date();
-        const pending = candidates.docs.find((d) => consultationPending(d.data(), now));
+        const pending = candidates.docs.find((d) =>
+          consultationPending(d.data(), now, { childInitiated: true }),
+        );
         if (pending) {
           if (pending.get('choice') === 'not_now')
             tx.update(pending.ref, {
               choice: FieldValue.delete(),
               choiceAt: FieldValue.delete(),
               followUpAt: FieldValue.delete(),
+              followUpAnswer: FieldValue.delete(),
+              followUpState: FieldValue.delete(),
+              followUpUpdatedAt: FieldValue.delete(),
               offeredAt: now,
-              offerCount: (pending.get('offerCount') as number) + 1,
+              offerCount: Number(pending.get('offerCount') ?? 1) + 1,
             });
           return { consultationId: pending.id };
         }
@@ -306,15 +334,21 @@ export function createExecutor(input: {
           sessionId,
         });
         return { consultationId };
-      }),
-    escalateCrisis: async (ctx, reason) => {
-      const result = await atomic(ctx, 'escalate_crisis', reason, true, async (tx, id) => {
+      });
+      const openingLine = (await input.kb.text(`templates/coaching/${ctx.gradeBand}.ja.txt`))
+        .split('\n')[0]
+        ?.trim();
+      return { ...result, ...(openingLine ? { openingLine } : {}) };
+    },
+    escalateCrisis: async (ctx, category) => {
+      const result = await atomic(ctx, 'escalate_crisis', category, true, async (tx, id) => {
         const crisisId = `agent_${id}`;
         tx.create(db.doc(`${base}/crisisEvents/${crisisId}`), {
           triggerType: 'text',
           sourceRef: sessionRef.path,
-          detection: { source: 'agent_tool', reason, familyHarmStatus: 'unknown' },
-          familyHarmSuspected: true,
+          detection: { source: 'agent_tool', category },
+          category,
+          familyHarmSuspected: category === 'family_harm',
           timeline: [{ step: 'agent_escalate', at: new Date() }],
           status: 'open',
           createdAt: new Date(),
@@ -322,7 +356,7 @@ export function createExecutor(input: {
         tx.update(sessionRef, { safeMode: true });
         return { crisisId };
       });
-      input.logger.warn('crisis.agent_escalate', { crisisId: result.crisisId, reason });
+      input.logger.warn('crisis.agent_escalate', { crisisId: result.crisisId, category });
       input.onCrisis?.(result.crisisId);
       return result;
     },

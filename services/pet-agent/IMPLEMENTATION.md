@@ -80,7 +80,11 @@ The ledger stores no content and has `expireAt` plus a Terraform TTL declaration
 `createPetTools` accepts an optional fifth argument:
 
 ```ts
-const options = { filter, turnId: () => String(currentSafetyEpoch) };
+const options = {
+  filter,
+  quickReplyCatalog: await loadQuickReplyCatalog(kb),
+  turnId: () => String(currentSafetyEpoch),
+};
 ```
 
 Use a per-utterance ID rather than the lifetime Live invocation ID to reset the
@@ -88,6 +92,13 @@ budget. Internal requests accept optional `operationId`; send the same stable
 ID for all calls/retries in that approved utterance. Legacy requests fall back
 to the latest message ID, or session ID before messages exist. A tool-call ID
 is not a suitable per-turn budget key.
+
+`offer_quick_replies` accepts intent IDs, not generated `options` text. Load the
+grade-specific catalog from `templates/quick_replies.ja.yaml` in both text and Live
+adapters. The tool returns rendered `options` to the model and emits the same
+`PetAction.quick_replies` shape as before. A missing catalog returns an unavailable
+result; it never falls back to arbitrary model-written button labels. Showing or
+clicking a reply does not itself consent to memory storage or sharing.
 
 The internal endpoint preserves `{ result }` and additionally returns `actions`.
 The existing voice forwarding executor may continue ignoring that field because

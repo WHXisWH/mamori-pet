@@ -86,6 +86,62 @@ describe('guardian notifications API', () => {
     expect((await app.request('/v1/notifications/n1', { headers: H('g_x') })).status).toBe(404);
   });
 
+  it('records adult action separately from acknowledgement and never exposes child followup answers', async () => {
+    const path = '/v1/notifications/n1/feedback';
+    expect(
+      (
+        await app.request(path, {
+          method: 'PUT',
+          headers: H('g_x'),
+          body: JSON.stringify({ action: 'talked' }),
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(path, {
+          method: 'PUT',
+          headers: H('g_n1'),
+          body: JSON.stringify({ action: 'resolved' }),
+        })
+      ).status,
+    ).toBe(400);
+    const result = await app.request(path, {
+      method: 'PUT',
+      headers: H('g_n1'),
+      body: JSON.stringify({ action: 'talked' }),
+    });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({
+      feedback: { action: 'talked', updatedAt: expect.any(String) },
+    });
+    const notification = (await db.doc(`families/${F}/notifications/n1`).get()).data()!;
+    expect(notification.acknowledgedAt).toBeUndefined();
+    expect((await db.doc(`families/${F}/children/${C}/crisisEvents/k1`).get()).get('status')).toBe(
+      'open',
+    );
+    await db
+      .doc(`families/${F}/children/${C}/consultations/attempt`)
+      .set({ notificationId: 'n1', followUpAnswer: 'need_help' });
+    const details = (await (
+      await app.request('/v1/notifications/n1', { headers: H('g_n1') })
+    ).json()) as NotificationDetail;
+    expect(details.feedback?.action).toBe('talked');
+    expect(details).not.toHaveProperty('followUpAnswer');
+    expect(JSON.stringify(details)).not.toContain('need_help');
+    await db.doc(`families/${F}/guardians/g_n2`).update({ revokedAt: new Date() });
+    expect(
+      (
+        await app.request(path, {
+          method: 'PUT',
+          headers: H('g_n2'),
+          body: JSON.stringify({ action: 'planned' }),
+        })
+      ).status,
+    ).toBe(403);
+    await db.doc(`families/${F}/guardians/g_n2`).set({ guardianId: 'g_n2', role: 'secondary' });
+  });
+
   it('acknowledges once and closes the crisis escalation', async () => {
     const r1 = await app.request('/v1/notifications/n1/ack', {
       method: 'POST',

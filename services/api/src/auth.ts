@@ -1,6 +1,14 @@
 import type { MiddlewareHandler } from 'hono';
 import { OAuth2Client } from 'google-auth-library';
-import { ApiHttpError, type Logger } from '@ijime/service-kit';
+import { rateLimit } from '@ijime/config';
+import {
+  ApiHttpError,
+  createSubjectRateLimit,
+  AdcGoogleHttp,
+  type GoogleHttp,
+  type Logger,
+  type SubjectRateLimit,
+} from '@ijime/service-kit';
 
 export const DEV_CHILD_HEADER = 'X-Dev-Child-Id';
 export const DEV_GUARDIAN_HEADER = 'X-Dev-Guardian-Id';
@@ -38,7 +46,46 @@ export type AuthOptions = {
   allowDevHeader: boolean;
   projectId?: string;
   verifyIdToken?: (token: string) => Promise<VerifiedIdentity>;
+  rateLimit?: SubjectRateLimit;
+  appCheck?: {
+    required: boolean;
+    verifyToken: (token: string) => Promise<void>;
+  };
 };
+
+// 子ども・保護者ごとの1分あたりのリクエスト数（docs/04-backend-api.md「サービス構成と共通規約」）。認証を通過してから数えるので、
+// 偽造トークンで他人の枠を使い切ることはできない。相談窓口の取得とペアリングは認証を通らないため、ここでは数えない
+const defaultRateLimit = createSubjectRateLimit({
+  child: rateLimit.childRequestsPerMinute,
+  guardian: rateLimit.guardianRequestsPerMinute,
+});
+
+// 主体ごとの制限をかけない子ども側エンドポイント：
+// - 「大人に話したい」は相談の入口なので、相談窓口と同じく常に使えるようにする
+// - 危機検知を通る入力には、より厳しいモデル枠が別にある（model-budget.ts）。枠を超えてもキーワードがヒットすれば危機として扱うため、
+//   ここで先に 429 で止めない
+const UNTHROTTLED_CHILD_ROUTES: readonly [string, RegExp][] = [
+  ['POST', /^\/v1\/child\/tell-adult$/],
+  ['POST', /^\/v1\/child\/chat\/sessions\/[^/]+\/messages$/],
+  ['POST', /^\/v1\/child\/consultations\/[^/]+\/choice$/],
+  ['PUT', /^\/v1\/child\/island$/],
+  ['POST', /^\/v1\/child\/island-scenes$/],
+  ['POST', /^\/v1\/child\/artworks$/],
+  ['POST', /^\/v1\/child\/pet-requests\/[^/]+\/complete$/],
+];
+
+export function unthrottledChildRoute(method: string, path: string): boolean {
+  return UNTHROTTLED_CHILD_ROUTES.some(([m, re]) => m === method && re.test(path));
+}
+
+function countChild(req: Request, opts: AuthOptions, childId: string): void {
+  if (unthrottledChildRoute(req.method, new URL(req.url).pathname)) return;
+  (opts.rateLimit ?? defaultRateLimit).check(req, 'child', childId);
+}
+
+function countGuardian(headers: Headers, opts: AuthOptions, guardianId: string): void {
+  (opts.rateLimit ?? defaultRateLimit).check({ headers }, 'guardian', guardianId);
+}
 
 const DEV_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -111,7 +158,35 @@ export function firebaseTokenVerifier(projectId: string, fetchImpl: typeof fetch
 
 const verifiers = new Map<string, ReturnType<typeof firebaseTokenVerifier>>();
 
+// Firebase documents the REST verifier for custom backends. Keeping the call behind a small
+// function makes local auth tests deterministic and lets Cloud Run use its ADC service account.
+export function firebaseAppCheckVerifier(
+  projectId: string,
+  http: GoogleHttp = new AdcGoogleHttp(),
+): (token: string) => Promise<void> {
+  return async (token: string) => {
+    if (!token || token.length > 8192) throw new Error('invalid_app_check_token');
+    await http.request({
+      method: 'POST',
+      url: `https://firebaseappcheck.googleapis.com/v1beta/projects/${encodeURIComponent(projectId)}:verifyAppCheckToken`,
+      body: { appCheckToken: token },
+    });
+  };
+}
+
+async function requireAppCheck(headers: Headers, opts: AuthOptions): Promise<void> {
+  if (!opts.appCheck?.required) return;
+  const token = headers.get('X-Firebase-AppCheck');
+  if (!token) throw new ApiHttpError('UNAUTHENTICATED', 'アプリの確認が必要です');
+  try {
+    await opts.appCheck.verifyToken(token);
+  } catch {
+    throw new ApiHttpError('UNAUTHENTICATED', 'アプリの確認ができません');
+  }
+}
+
 export async function accountIdentity(headers: Headers, opts: AuthOptions) {
+  await requireAppCheck(headers, opts);
   const bearer = headers.get('Authorization');
   if (bearer) {
     const identity = await bearerIdentity(bearer, opts);
@@ -122,11 +197,14 @@ export async function accountIdentity(headers: Headers, opts: AuthOptions) {
       (identity.role !== undefined && identity.role !== 'guardian')
     )
       throw new ApiHttpError('PERMISSION_DENIED', '保護者のアカウントが必要です');
+    countGuardian(headers, opts, identity.sub);
     return { ...identity, development: false };
   }
   const dev = headers.get(DEV_GUARDIAN_HEADER);
-  if (process.env['NODE_ENV'] !== 'production' && opts.allowDevHeader && dev && DEV_ID.test(dev))
+  if (process.env['NODE_ENV'] !== 'production' && opts.allowDevHeader && dev && DEV_ID.test(dev)) {
+    countGuardian(headers, opts, dev);
     return { sub: dev, email: '', development: true };
+  }
   throw new ApiHttpError('UNAUTHENTICATED', 'ログインが必要です');
 }
 
@@ -151,11 +229,13 @@ async function bearerIdentity(header: string, opts: AuthOptions): Promise<Verifi
 
 export function childAuth(opts: AuthOptions): MiddlewareHandler<AuthEnv> {
   return async (c, next) => {
+    await requireAppCheck(c.req.raw.headers, opts);
     const bearer = c.req.header('Authorization');
     if (bearer) {
       const identity = await bearerIdentity(bearer, opts);
       if (identity.role !== 'child' || !identity.childId || !DEV_ID.test(identity.childId))
         throw new ApiHttpError('PERMISSION_DENIED', '子どものアカウントが必要です');
+      countChild(c.req.raw, opts, identity.childId);
       c.set('child', { role: 'child', childId: identity.childId });
       await next();
       return;
@@ -167,6 +247,7 @@ export function childAuth(opts: AuthOptions): MiddlewareHandler<AuthEnv> {
       dev &&
       DEV_ID.test(dev)
     ) {
+      countChild(c.req.raw, opts, dev);
       c.set('child', { role: 'child', childId: dev });
       await next();
       return;
@@ -181,11 +262,13 @@ export function guardianAuth(
   familyOf: (guardianId: string) => Promise<string | undefined>,
 ): MiddlewareHandler<GuardianAuthEnv> {
   return async (c, next) => {
+    await requireAppCheck(c.req.raw.headers, opts);
     const bearer = c.req.header('Authorization');
     if (bearer) {
       const identity = await bearerIdentity(bearer, opts);
       if (identity.role !== 'guardian')
         throw new ApiHttpError('PERMISSION_DENIED', '保護者のアカウントが必要です');
+      countGuardian(c.req.raw.headers, opts, identity.sub);
       const familyId = await familyOf(identity.sub);
       if (!familyId) throw new ApiHttpError('PERMISSION_DENIED', '家族が見つかりません');
       c.set('guardian', { role: 'guardian', guardianId: identity.sub, familyId });
@@ -199,6 +282,7 @@ export function guardianAuth(
       dev &&
       DEV_ID.test(dev)
     ) {
+      countGuardian(c.req.raw.headers, opts, dev);
       const familyId = await familyOf(dev);
       if (!familyId) throw new ApiHttpError('PERMISSION_DENIED', '家族が見つかりません');
       c.set('guardian', { role: 'guardian', guardianId: dev, familyId });

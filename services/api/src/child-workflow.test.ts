@@ -5,10 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { Firestore } from '@google-cloud/firestore';
 import { DevChildDirectory } from '@ijime/agent-core';
 import { CrisisDetector, KeywordMatcher } from '@ijime/crisis-detector';
-import type { ChildHomeRes, ChoiceRes, ConsultationRes, FollowupsRes } from '@ijime/api-types';
+import type {
+  ChildHomeRes,
+  ChoiceRes,
+  ConsultationRes,
+  FollowupAnswerRes,
+  FollowupsRes,
+  TellAdultRes,
+} from '@ijime/api-types';
 import { FsKbSource, Kb, storyRequestsSchema } from '@ijime/kb-loader';
 import { Logger } from '@ijime/service-kit';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from './app.js';
 import type { ChatDeps } from './chat.js';
@@ -325,6 +332,295 @@ describe('authorized memory lifecycle', () => {
 });
 
 describe('consultation and follow-up workflows', () => {
+  it.each(['self', 'proxy'] as const)(
+    'reuses an early not_now attempt for %s without leaving a duplicate followup',
+    async (choice) => {
+      const o = await owner();
+      const start = new Date('2026-10-07T06:00:00Z');
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(start);
+      try {
+        const { consultationId } = (await (
+          await request(o.childId, '/tell-adult', 'POST', {})
+        ).json()) as TellAdultRes;
+        expect(
+          (
+            await request(o.childId, `/consultations/${consultationId}/choice`, 'POST', {
+              choice: 'not_now',
+            })
+          ).status,
+        ).toBe(200);
+        vi.setSystemTime(new Date(start.getTime() + 86_400_000));
+        expect(
+          (await (await request(o.childId, '/home')).json()) as ChildHomeRes,
+        ).not.toHaveProperty('pendingConsultation');
+        const returned = await request(
+          o.childId,
+          '/tell-adult',
+          'POST',
+          {},
+          { 'Idempotency-Key': 'resume' },
+        );
+        expect(await returned.json()).toMatchObject({ consultationId });
+        expect(
+          await (
+            await request(o.childId, '/tell-adult', 'POST', {}, { 'Idempotency-Key': 'resume' })
+          ).json(),
+        ).toMatchObject({ consultationId });
+        const ref = db.doc(`${o.base}/consultations/${consultationId}`);
+        const reopened = (await ref.get()).data()!;
+        for (const field of ['choice', 'choiceAt', 'followUpAt'])
+          expect(reopened[field]).toBeUndefined();
+        expect(reopened.offerCount).toBe(2);
+        expect((await db.collection(`${o.base}/consultations`).get()).size).toBe(1);
+        expect(
+          (await (
+            await request(o.childId, `/consultations/${consultationId}`)
+          ).json()) as ConsultationRes,
+        ).toMatchObject({ status: 'pending' });
+        expect(
+          (
+            await request(o.childId, `/consultations/${consultationId}/choice`, 'POST', {
+              choice,
+              ...(choice === 'proxy' ? { summary: { text: SECRET, confirmed: true } } : {}),
+            })
+          ).status,
+        ).toBe(200);
+        vi.setSystemTime(new Date(start.getTime() + 3 * 86_400_000));
+        expect(await (await request(o.childId, '/followups')).json()).toEqual({ items: [] });
+        vi.setSystemTime(new Date(start.getTime() + 5 * 86_400_000));
+        const due = (await (await request(o.childId, '/followups')).json()) as FollowupsRes;
+        expect(due.items).toHaveLength(1);
+        expect(due.items[0]?.consultationId).toBe(consultationId);
+        expect(
+          (
+            await request(o.childId, `/followups/${due.items[0]!.followupId}/answer`, 'POST', {
+              answer: 'supported',
+            })
+          ).status,
+        ).toBe(200);
+        vi.setSystemTime(new Date(start.getTime() + 10 * 86_400_000));
+        expect(await (await request(o.childId, '/followups')).json()).toEqual({ items: [] });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('resumes a postponed followup without reusing an old round receipt', async () => {
+    const o = await owner();
+    const ref = db.doc(`${o.base}/consultations/later`);
+    await ref.set({
+      level: 'l2',
+      choice: 'not_now',
+      offerCount: 1,
+      offeredAt: new Date(),
+      followUpAt: new Date(0),
+    });
+    const answer = await request(o.childId, '/followups/consultation-later/answer', 'POST', {
+      answer: 'not_now',
+    });
+    expect(answer.status).toBe(200);
+    expect((await ref.get()).get('followUpRound')).toBe(1);
+    expect(await (await request(o.childId, '/tell-adult', 'POST', {})).json()).toMatchObject({
+      consultationId: 'later',
+    });
+    const resumed = (await ref.get()).data()!;
+    for (const field of [
+      'choice',
+      'choiceAt',
+      'followUpAt',
+      'followUpAnswer',
+      'followUpState',
+      'followUpUpdatedAt',
+    ])
+      expect(resumed[field]).toBeUndefined();
+    expect(resumed.followUpRound).toBe(1);
+    expect(
+      (await request(o.childId, '/consultations/later/choice', 'POST', { choice: 'self' })).status,
+    ).toBe(200);
+    const retry = await request(o.childId, '/followups/consultation-later/answer', 'POST', {
+      answer: 'not_now',
+    });
+    expect(retry.status).toBe(200);
+    expect((await ref.get()).get('choice')).toBe('self');
+    expect((await ref.get()).get('followUpState')).toBeUndefined();
+  });
+
+  it.each(['supported', 'paused'] as const)(
+    'does not revive the stopped %s attempt on explicit help',
+    async (state) => {
+      const o = await owner();
+      const ref = db.doc(`${o.base}/consultations/old`);
+      await ref.set({
+        level: 'l2',
+        choice: 'not_now',
+        offeredAt: new Date(),
+        offerCount: 1,
+        followUpState: state,
+        followUpAnsweredAt: new Date(),
+      });
+      const before = (await ref.get()).data();
+      const result = (await (
+        await request(o.childId, '/tell-adult', 'POST', {})
+      ).json()) as TellAdultRes;
+      expect(result.consultationId).toBeTruthy();
+      expect(result.consultationId).not.toBe('old');
+      expect((await ref.get()).data()).toEqual(before);
+    },
+  );
+
+  it.each(['open', 'guardian_acknowledged'])(
+    'keeps early not_now unchanged when family harm is unresolved: %s',
+    async (status) => {
+      const o = await owner();
+      const ref = db.doc(`${o.base}/consultations/later`);
+      await ref.set({
+        level: 'l2',
+        choice: 'not_now',
+        offeredAt: new Date(),
+        offerCount: 1,
+        followUpAt: new Date(Date.now() + 86_400_000),
+      });
+      const before = (await ref.get()).data();
+      await db
+        .doc(`${o.base}/crisisEvents/unsafe`)
+        .set({ status, familyHarmSuspected: true, createdAt: new Date() });
+      const result = await (await request(o.childId, '/tell-adult', 'POST', {})).json();
+      expect(result).toMatchObject({ crisis: { crisisId: 'unsafe' } });
+      expect(result).not.toHaveProperty('consultationId');
+      expect((await ref.get()).data()).toEqual(before);
+      expect((await db.collection(`${o.base}/consultations`).get()).size).toBe(1);
+    },
+  );
+
+  it.each([
+    [23, true],
+    [25, false],
+  ])(
+    'treats an acknowledged crisis as closed 24 hours after the acknowledgement (%s h ago, still active: %s)',
+    async (hoursAgo, active) => {
+      const o = await owner();
+      await db.doc(`${o.base}/crisisEvents/acked`).set({
+        status: 'guardian_acknowledged',
+        familyHarmSuspected: false,
+        createdAt: new Date(Date.now() - (hoursAgo + 1) * 3_600_000),
+        timeline: [
+          { step: 'guardian_acknowledged', at: new Date(Date.now() - hoursAgo * 3_600_000) },
+        ],
+      });
+      const result = (await (
+        await request(o.childId, '/tell-adult', 'POST', {})
+      ).json()) as TellAdultRes;
+      if (active) {
+        expect(result).toMatchObject({ crisis: { crisisId: 'acked' } });
+        expect(result).not.toHaveProperty('consultationId');
+      } else {
+        expect(result).not.toHaveProperty('crisis');
+        expect(result.consultationId).toBeTruthy();
+      }
+    },
+  );
+
+  it('follows a proxy attempt across time without treating no reply or an adult conversation as success', async () => {
+    const o = await owner();
+    const start = new Date('2026-10-07T06:00:00Z');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(start);
+    try {
+      const { consultationId } = (await (
+        await request(o.childId, '/tell-adult', 'POST', {})
+      ).json()) as TellAdultRes;
+      const chosen = await request(o.childId, `/consultations/${consultationId}/choice`, 'POST', {
+        choice: 'proxy',
+        summary: { text: 'お母さんとお話したいです', confirmed: true },
+      });
+      expect(chosen.status).toBe(200);
+      expect(await (await request(o.childId, '/followups')).json()).toEqual({ items: [] });
+      vi.setSystemTime(new Date(start.getTime() + 4 * 86_400_000));
+      const first = ((await (await request(o.childId, '/followups')).json()) as FollowupsRes)
+        .items[0]!;
+      expect(first).toMatchObject({ consultationId, kind: 'consultation' });
+      vi.setSystemTime(new Date(start.getTime() + 5 * 86_400_000));
+      expect(
+        ((await (await request(o.childId, '/followups')).json()) as FollowupsRes).items[0],
+      ).toEqual(first);
+      const ref = db.doc(`${o.base}/consultations/${consultationId}`);
+      expect((await ref.get()).get('followUpAnsweredAt')).toBeUndefined();
+      const answer = await (
+        await request(o.childId, `/followups/${first.followupId}/answer`, 'POST', {
+          answer: 'talked',
+        })
+      ).json();
+      expect(answer).toMatchObject({ continuation: 'scheduled', dueAt: expect.any(String) });
+      expect((await ref.get()).get('followUpState')).toBe('talked');
+      expect(await (await request(o.childId, '/followups')).json()).toEqual({ items: [] });
+      vi.setSystemTime(new Date(start.getTime() + 9 * 86_400_000));
+      const second = ((await (await request(o.childId, '/followups')).json()) as FollowupsRes)
+        .items[0]!;
+      expect(second.followupId).not.toBe(first.followupId);
+      const stop = (await (
+        await request(o.childId, `/followups/${second.followupId}/answer`, 'POST', {
+          answer: 'supported',
+        })
+      ).json()) as FollowupAnswerRes;
+      expect(stop.continuation).toBe('supported');
+      expect(await (await request(o.childId, '/followups')).json()).toEqual({ items: [] });
+      expect((await ref.get()).get('followUpState')).toBe('supported');
+      expect((await ref.get()).get('resolvedAt')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('postpones with round-specific retry receipts and stops asking at the cap', async () => {
+    const o = await owner();
+    const ref = db.doc(`${o.base}/consultations/later`);
+    await ref.set({
+      level: 'l2',
+      choice: 'self',
+      offeredAt: new Date(),
+      offerCount: 1,
+      followUpAt: new Date(0),
+    });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    try {
+      let firstId = '';
+      let firstResult: unknown;
+      for (let round = 0; round < 3; round++) {
+        vi.setSystemTime(new Date(start + round * 4 * 86_400_000));
+        const item = ((await (await request(o.childId, '/followups')).json()) as FollowupsRes)
+          .items[0]!;
+        expect(item).toBeDefined();
+        const response = await request(o.childId, `/followups/${item.followupId}/answer`, 'POST', {
+          answer: 'not_now',
+        });
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as FollowupAnswerRes;
+        expect(body.continuation).toBe(round === 2 ? 'paused' : 'scheduled');
+        if (round === 0) {
+          firstId = item.followupId;
+          firstResult = body;
+        } else {
+          expect(
+            await (
+              await request(o.childId, `/followups/${firstId}/answer`, 'POST', {
+                answer: 'not_now',
+              })
+            ).json(),
+          ).toEqual(firstResult);
+        }
+      }
+      vi.setSystemTime(new Date(start + 30 * 86_400_000));
+      expect(await (await request(o.childId, '/followups')).json()).toEqual({ items: [] });
+      expect((await ref.get()).get('followUpState')).toBe('paused');
+      expect((await request(o.childId, '/tell-adult', 'POST', {})).status).toBe(201);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('creates a consultation, binds all reads to the current child, and returns no risk level', async () => {
     const o = await owner();
     const other = await owner();
@@ -508,7 +804,7 @@ describe('active crisis overrides ordinary help workflows', () => {
     expect(events.length).toBe(before);
   });
 
-  it('persists unavailable detector evidence and does not claim a parent notification', async () => {
+  it('persists unavailable detector evidence and routes a keyword hit as other', async () => {
     const o = await owner();
     await db
       .doc(`${o.base}/consultations/c1`)
@@ -534,14 +830,15 @@ describe('active crisis overrides ordinary help workflows', () => {
     });
     expect(response.status).toBe(200);
     const result = (await response.json()) as ChoiceRes;
-    expect(result.notificationQueued).toBe(false);
+    expect(result.notificationQueued).toBe(true);
     expect(result.crisis).toBeDefined();
     const event = await db.doc(`${o.base}/crisisEvents/${result.crisis!.crisisId}`).get();
     expect(event.get('detection')).toMatchObject({
       availability: 'unavailable',
       method: 'review_timeout',
     });
-    expect(event.get('familyHarmSuspected')).toBe(true);
+    expect(event.get('category')).toBe('other');
+    expect(event.get('familyHarmSuspected')).toBe(false);
   });
 
   it.each([true, undefined])(
@@ -602,6 +899,67 @@ describe('active crisis overrides ordinary help workflows', () => {
       crisis: { crisisId: 'z-unsafe' },
     });
   });
+
+  it('lets the child acknowledge a family-harm crisis, reopening help and pinning 189 on the home screen', async () => {
+    const o = await owner();
+    const ref = db.doc(`${o.base}/crisisEvents/family`);
+    await ref.set({ status: 'open', familyHarmSuspected: true, createdAt: new Date() });
+    expect(await (await request(o.childId, '/tell-adult', 'POST', {})).json()).toMatchObject({
+      crisis: { crisisId: 'family' },
+    });
+    const ack = await request(o.childId, '/crisis-acknowledgements', 'POST', {});
+    expect(ack.status).toBe(200);
+    expect(await ack.json()).toEqual({ acknowledged: 1 });
+    const event = (await ref.get()).data()!;
+    expect(event['status']).toBe('child_acknowledged');
+    expect(event['timeline']).toContainEqual(
+      expect.objectContaining({ step: 'child_acknowledged' }),
+    );
+    const tell = (await (
+      await request(o.childId, '/tell-adult', 'POST', {})
+    ).json()) as TellAdultRes;
+    expect(tell).not.toHaveProperty('crisis');
+    expect(tell.consultationId).toBeTruthy();
+    const home = (await (await request(o.childId, '/home')).json()) as ChildHomeRes;
+    expect(home.careHotline).toMatchObject({ id: 'jidou_soudan', phone: '189' });
+    expect(home.greeting.expression).toBe('caring');
+  });
+
+  it('does not let the child acknowledge a crisis that guardians were notified about', async () => {
+    const o = await owner();
+    await db
+      .doc(`${o.base}/crisisEvents/notified`)
+      .set({ status: 'open', familyHarmSuspected: false, createdAt: new Date() });
+    expect(await (await request(o.childId, '/crisis-acknowledgements', 'POST', {})).json()).toEqual(
+      { acknowledged: 0 },
+    );
+    expect(await (await request(o.childId, '/tell-adult', 'POST', {})).json()).toMatchObject({
+      crisis: { crisisId: 'notified' },
+    });
+    expect((await (await request(o.childId, '/home')).json()) as ChildHomeRes).not.toHaveProperty(
+      'careHotline',
+    );
+  });
+
+  it.each([
+    [6, true],
+    [8, false],
+  ])(
+    'treats an unacknowledged family-harm crisis as closed 7 days after detection (%s days ago, still active: %s)',
+    async (daysAgo, active) => {
+      const o = await owner();
+      await db.doc(`${o.base}/crisisEvents/stale`).set({
+        status: 'open',
+        familyHarmSuspected: true,
+        createdAt: new Date(Date.now() - daysAgo * 86_400_000),
+      });
+      const result = (await (
+        await request(o.childId, '/tell-adult', 'POST', {})
+      ).json()) as TellAdultRes;
+      if (active) expect(result).toMatchObject({ crisis: { crisisId: 'stale' } });
+      else expect(result.consultationId).toBeTruthy();
+    },
+  );
 });
 
 describe('production child access policy', () => {

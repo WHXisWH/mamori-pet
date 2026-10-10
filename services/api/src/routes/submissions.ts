@@ -27,6 +27,7 @@ export type SubmissionDeps = Pick<
   | 'detector'
   | 'safeModeCopy'
   | 'hotlines'
+  | 'pausedReplies'
   | 'auth'
   | 'logger'
   | 'publish'

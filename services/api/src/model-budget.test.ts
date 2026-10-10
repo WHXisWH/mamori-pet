@@ -131,7 +131,8 @@ describe('checkWithinBudget', () => {
       hit: true,
       method: 'keyword',
       keywordMatched: true,
-      familyHarmSuspected: true,
+      category: 'other',
+      familyHarmSuspected: false,
     });
     expect(check).not.toHaveBeenCalled();
   });

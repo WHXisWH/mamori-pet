@@ -5,13 +5,18 @@ import type { BaseLlm } from '@google/adk';
 import type { GradeBand, PetAction } from '@ijime/api-types';
 import {
   buildPetInstruction,
+  childPath,
   createGemini,
   createPetAgent,
+  createPetCallbacks,
   createPetTools,
+  loadGamePreferenceRules,
+  gamePreferenceChange,
   defaultPetName,
   LocalChildDirectory,
   disableAdkContentCapture,
   FirestoreChildDirectory,
+  ScopedChildDirectory,
   FirestoreSessionService,
   OutputFilter,
   petDemoScript,
@@ -23,11 +28,23 @@ import {
 } from '@ijime/agent-core';
 import { loadEnv, type Env } from '@ijime/config';
 import { KmsKeyWrapper, kmsKeyPath } from '@ijime/crypto';
-import { FsKbSource, Kb, outputFilterSchema, safeRepliesSchema } from '@ijime/kb-loader';
+import {
+  FsKbSource,
+  Kb,
+  loadQuickReplyCatalog,
+  outputFilterSchema,
+  safeRepliesSchema,
+} from '@ijime/kb-loader';
 import { Logger, PubSubRestPublisher, type Publisher } from '@ijime/service-kit';
 
 import { createExecutor } from './executor.js';
 import { createSkillSearch } from './skills.js';
+import { createModelNameDetector } from './pseudonyms.js';
+import { createModelSummaryGenerator, type SummaryGenerator } from './summary.js';
+import { createModelArmorInspector, type OutputInspector } from './model-armor.js';
+import { createMemorySearch } from './memory-search.js';
+import { createChildPushSender, type ChildPushSender } from './child-push.js';
+import { consultationPending } from './context.js';
 
 export type PetRuntime = {
   kb: Kb;
@@ -37,6 +54,9 @@ export type PetRuntime = {
   filter: OutputFilter;
   safeReplies: Record<GradeBand, string>;
   model: BaseLlm;
+  summarize?: SummaryGenerator;
+  inspectOutput?: OutputInspector;
+  childPush?: ChildPushSender;
   logger: Logger;
   publish: Publisher['publish'];
   executorFor: (
@@ -105,6 +125,8 @@ export async function createRuntime(overrides: Partial<PetRuntime> = {}): Promis
     }
   }
 
+  // 1ターンの中でセッションサービスとツールが child を何度も読む：同じリクエストでは1回だけ読む
+  directory = new ScopedChildDirectory(directory);
   const sessions =
     overrides.sessions ?? new FirestoreSessionService(db, directory, { writeUserEvents: false });
   const filter =
@@ -125,6 +147,7 @@ export async function createRuntime(overrides: Partial<PetRuntime> = {}): Promis
   }
 
   const searchSkill = await createSkillSearch(kb, process.env, { db, logger });
+  const searchMemory = createMemorySearch(process.env, { db, sessions, logger });
   const executorFor =
     overrides.executorFor ??
     ((
@@ -140,12 +163,33 @@ export async function createRuntime(overrides: Partial<PetRuntime> = {}): Promis
         child,
         sessionId,
         searchSkill,
+        ...(searchMemory ? { searchMemory } : {}),
         logger,
         publish,
         ...(onCrisis ? { onCrisis } : {}),
+        ...(modelMode() === 'vertex' ? { detectNames: createModelNameDetector(kb, model) } : {}),
       }));
 
-  return { kb, db, directory, sessions, filter, safeReplies, model, logger, publish, executorFor };
+  const summarize =
+    overrides.summarize ??
+    (modelMode() === 'vertex' ? createModelSummaryGenerator(kb, model, filter) : undefined);
+  const inspectOutput = overrides.inspectOutput ?? createModelArmorInspector(process.env);
+  const childPush = overrides.childPush ?? (await createChildPushSender({ db, directory, kb }));
+  return {
+    kb,
+    db,
+    directory,
+    sessions,
+    filter,
+    safeReplies,
+    model,
+    logger,
+    publish,
+    executorFor,
+    ...(summarize ? { summarize } : {}),
+    ...(inspectOutput ? { inspectOutput } : {}),
+    ...(childPush ? { childPush } : {}),
+  };
 }
 
 export async function buildAgent(
@@ -156,7 +200,13 @@ export async function buildAgent(
   onCrisis?: (crisisId: string) => void,
   operationId?: string,
   text = '',
+  proactive = false,
 ) {
+  const gamePreferenceRules = proactive ? undefined : await loadGamePreferenceRules(rt.kb);
+  const declined = gamePreferenceRules && gamePreferenceChange(text, gamePreferenceRules);
+  // Persist before Runner starts: state deltas on Gemini usage-only tail events can terminate the ADK tool loop.
+  if (declined !== undefined)
+    await rt.sessions.setGameSuggestionsDeclined(child.childId, sessionId, declined);
   const executor = rt.executorFor(child, sessionId, actions, onCrisis);
   const ctx: TurnContext = {
     childId: child.childId,
@@ -165,17 +215,55 @@ export async function buildAgent(
     characterId: child.characterId,
     ...(operationId ? { operationId } : {}),
   };
-  const tools = createPetTools(
+  const allTools = createPetTools(
     executor,
     ctx,
-    (a) => actions.push(a),
+    (a) => {
+      if (
+        a.type === 'offer_tell_adult' &&
+        actions.some(
+          (existing) =>
+            existing.type === 'offer_tell_adult' && existing.consultationId === a.consultationId,
+        )
+      )
+        return;
+      actions.push(a);
+    },
     (name) => {
       if (name === 'escalate_crisis') throw new Error('crisis_escalation_failed');
       return { error: 'tool_unavailable' };
     },
-    { filter: rt.filter },
+    { filter: rt.filter, quickReplyCatalog: await loadQuickReplyCatalog(rt.kb) },
   );
+  const tools = proactive
+    ? allTools.filter((tool) => ['recall', 'suggest_game', 'set_expression'].includes(tool.name))
+    : allTools;
   const status = await executor.getChildContext(ctx);
+  // Restore only the child's explicit, unfinished "I still need help" flow. No tool execution or writes.
+  if (!proactive && status.pendingConsultationId) {
+    const saved = await rt.db
+      .doc(
+        `${childPath(child.familyId, child.childId)}/consultations/${status.pendingConsultationId}`,
+      )
+      .get();
+    const data = saved.data();
+    if (
+      data?.['source'] === 'child_followup' &&
+      data['followUpReason'] === 'need_help' &&
+      data['choice'] == null &&
+      consultationPending(data, new Date())
+    ) {
+      const openingLine = (await rt.kb.text(`templates/coaching/${child.gradeBand}.ja.txt`))
+        .split('\n')[0]
+        ?.trim();
+      actions.push({
+        type: 'offer_tell_adult',
+        consultationId: saved.id,
+        source: 'restored_followup',
+        ...(openingLine ? { openingLine } : {}),
+      });
+    }
+  }
   const memories = text.trim() ? await executor.recall(ctx, text) : [];
   const instruction = await buildPetInstruction(rt.kb, {
     characterId: child.characterId,
@@ -184,6 +272,22 @@ export async function buildAgent(
     status,
     memories,
     voice: false,
+    restoredHelp: actions.some(
+      (a) => a.type === 'offer_tell_adult' && a.source === 'restored_followup',
+    ),
   });
-  return createPetAgent({ model: rt.model, instruction, tools });
+  return createPetAgent({
+    model: rt.model,
+    instruction,
+    tools,
+    ...createPetCallbacks({
+      filter: rt.filter,
+      safeReply: rt.safeReplies[child.gradeBand],
+      ...(gamePreferenceRules ? { gamePreferenceRules } : {}),
+      ...(rt.inspectOutput ? { inspectOutput: rt.inspectOutput } : {}),
+      ...(executor.prepareMemory
+        ? { prepareMemory: (content) => executor.prepareMemory!(ctx, content) }
+        : {}),
+    }),
+  });
 }

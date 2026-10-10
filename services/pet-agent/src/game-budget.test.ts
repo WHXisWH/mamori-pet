@@ -126,7 +126,7 @@ describe('child-scoped weekly game budget', () => {
     for (let i = 0; i < agent.suggestGameWeeklyLimit; i++) await suggest(`turn_${i}`);
     expect((await suggest('over')).result).toEqual({ error: 'game_suggestion_limit' });
     expect(
-      (await suggest('urgent', 'escalate_crisis', { reason: 'violence' })).result,
+      (await suggest('urgent', 'escalate_crisis', { category: 'violence' })).result,
     ).toHaveProperty('crisisId');
   });
 });

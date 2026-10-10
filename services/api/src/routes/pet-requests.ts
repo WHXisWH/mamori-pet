@@ -8,7 +8,7 @@ import type {
   PetRequestsRes,
 } from '@ijime/api-types';
 import { PET_REQUEST_TYPES } from '@ijime/api-types';
-import { limits, retention } from '@ijime/config';
+import { ACTIVE_CRISIS_STATUSES, isCrisisLockingChild, limits, retention } from '@ijime/config';
 import { fieldAad } from '@ijime/crypto';
 import type { CrisisCheck } from '@ijime/crisis-detector';
 import {
@@ -270,9 +270,9 @@ export function registerPetRequests(app: ServiceApp, getDeps: () => Promise<Subm
           const openCrisis = await tx.get(
             deps.db
               .collection(`${base}/crisisEvents`)
-              .where('status', 'in', ['open', 'guardian_acknowledged'])
-              .limit(1),
+              .where('status', 'in', ACTIVE_CRISIS_STATUSES),
           );
+          const crisisActive = openCrisis.docs.some((d) => isCrisisLockingChild(d.data(), now));
           const recent = await tx.get(
             deps.db
               .collection(`${base}/consultations`)
@@ -280,7 +280,7 @@ export function registerPetRequests(app: ServiceApp, getDeps: () => Promise<Subm
               .limit(limits.pageSize.max),
           );
           const pending = recent.docs.find((d) => consultationIsPending(d.data(), now));
-          if (openCrisis.empty && !pending) {
+          if (!crisisActive && !pending) {
             tx.create(deps.db.doc(`${base}/consultations/req-${requestId}`), {
               assessmentId: 'child-request',
               level: 'l2',

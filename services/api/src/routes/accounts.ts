@@ -11,12 +11,13 @@ import {
   type PairRes,
   type PairingCodeRes,
 } from '@ijime/api-types';
-import { limits, rateLimit, retention } from '@ijime/config';
+import { limits, retention } from '@ijime/config';
 import type { EnvelopeCipher, Pseudonymizer } from '@ijime/crypto';
 import { ApiHttpError, type ServiceApp } from '@ijime/service-kit';
 import { z } from 'zod';
 
 import { accountIdentity, type AuthOptions, type VerifiedIdentity } from '../auth.js';
+import { takePairingSlot } from '../pairing-limiter.js';
 import { familyOfGuardian } from './notifications.js';
 import { resourceId, storedDate } from './workflow-store.js';
 
@@ -25,7 +26,7 @@ export type AccountTokenIssuer = {
   developmentOnly: boolean;
   setGuardianClaims(
     uid: string,
-    claims: { role: 'guardian'; familyId: string; guardianRole: 'primary' },
+    claims: { role: 'guardian'; familyId: string; guardianRole: 'primary' | 'secondary' },
   ): Promise<void>;
   issueChildToken(claims: ChildClaims): Promise<string>;
 };
@@ -51,9 +52,9 @@ const consentSchema = z.strictObject({
   verification: z.record(z.string().max(100), z.string().max(1000)).optional(),
 });
 const noSources = Object.fromEntries(DATA_SOURCES.map((source) => [source, false]));
-const unavailable = () =>
+export const unavailable = () =>
   new ApiHttpError('MODEL_UNAVAILABLE', 'アカウント連携が設定されていません');
-function issuerFor(deps: AccountDeps) {
+export function issuerFor(deps: AccountDeps) {
   const issuer = deps.issuer;
   if (
     !issuer ||
@@ -64,7 +65,7 @@ function issuerFor(deps: AccountDeps) {
   return issuer;
 }
 
-async function activeFamily(
+export async function activeFamily(
   deps: AccountDeps,
   tx: Transaction,
   familyId: string,
@@ -468,23 +469,8 @@ export function registerAccounts(app: ServiceApp, getDeps: () => Promise<Account
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new ApiHttpError('INVALID_ARGUMENT', '6桁の番号を入力してください');
     const issuer = issuerFor(deps);
-    // A shared transaction bounds anonymous guessing across processes; no IP or child content is stored.
-    const throttle = deps.db.doc('pairingAttempts/public');
-    const allowed = await deps.db.runTransaction(async (tx) => {
-      const saved = await tx.get(throttle);
-      const now = deps.now();
-      const count =
-        (storedDate(saved.get('expiresAt'))?.getTime() ?? 0) > now.getTime()
-          ? Number(saved.get('count') ?? 0)
-          : 0;
-      if (count >= rateLimit.childRequestsPerMinute) return false;
-      tx.set(throttle, {
-        count: count + 1,
-        expiresAt: count === 0 ? new Date(now.getTime() + 60_000) : saved.get('expiresAt'),
-      });
-      return true;
-    });
-    if (!allowed) throw new ApiHttpError('RATE_LIMITED', '少し待ってから試してください');
+    if (!(await takePairingSlot(deps.db, deps.now())))
+      throw new ApiHttpError('RATE_LIMITED', '少し待ってから試してください');
     const codeHash = hash(parsed.data.code);
     const lookup = deps.db.doc(`pairingCodeLookup/${codeHash}`);
     const claims = await deps.db.runTransaction(async (tx): Promise<ChildClaims> => {

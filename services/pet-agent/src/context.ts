@@ -1,5 +1,10 @@
 import type { Firestore } from '@google-cloud/firestore';
-import { childPath, type ChildContext, type ChildRecord } from '@ijime/agent-core';
+import {
+  childPath,
+  type ChildContext,
+  type ChildRecord,
+  type FirestoreSessionService,
+} from '@ijime/agent-core';
 import { agent, consultation } from '@ijime/config';
 import { holidaysSchema, weeklyReportSentencesSchema, type Kb } from '@ijime/kb-loader';
 
@@ -19,8 +24,29 @@ export function jstParts(now: Date) {
   };
 }
 
-export function consultationPending(data: Record<string, unknown>, now: Date): boolean {
-  if (data['closedAt'] || data['notificationId']) return false;
+export function consultationPending(
+  data: Record<string, unknown>,
+  now: Date,
+  options: { childInitiated?: boolean } = {},
+): boolean {
+  if (
+    data['closedAt'] ||
+    data['notificationId'] ||
+    data['crisisId'] ||
+    data['familyHarmSuspected'] ||
+    data['followUpAnsweredAt']
+  )
+    return false;
+  // The child's change of mind does not have to wait for an unsolicited reminder.
+  if (
+    options.childInitiated &&
+    data['choice'] === 'not_now' &&
+    data['level'] === 'l2' &&
+    (!data['followUpState'] || ['later', 'talked'].includes(data['followUpState'] as string)) &&
+    (!data['followUpAnswer'] || ['not_now', 'talked'].includes(data['followUpAnswer'] as string))
+  )
+    return true;
+  if (data['followUpAnswer'] || data['followUpState']) return false;
   if (!data['choice']) return true;
   const followUp = asDate(data['followUpAt']);
   return (
@@ -33,25 +59,85 @@ export function consultationPending(data: Record<string, unknown>, now: Date): b
   );
 }
 
+function attemptTime(data: Record<string, unknown>): number {
+  return Math.max(
+    ...['offeredAt', 'choiceAt', 'followUpUpdatedAt'].map((field) => dateTime(data[field])),
+  );
+}
+
+function dateTime(value: unknown): number {
+  const time = asDate(value)?.getTime();
+  return time !== undefined && Number.isFinite(time) ? time : 0;
+}
+
+function helpAttempt(
+  data: Record<string, unknown>,
+  now: Date,
+): NonNullable<ChildContext['helpAttempt']> {
+  const choice = data['choice'];
+  const storedState = data['followUpState'];
+  const answer = data['followUpAnswer'];
+  const state =
+    storedState === 'talked' ||
+    storedState === 'later' ||
+    storedState === 'needs_help' ||
+    storedState === 'supported' ||
+    storedState === 'paused'
+      ? storedState
+      : answer === 'talked' || answer === 'supported'
+        ? answer
+        : answer === 'not_now'
+          ? 'later'
+          : answer === 'need_help' ||
+              (data['source'] === 'child_followup' && data['followUpReason'] === 'need_help')
+            ? 'needs_help'
+            : 'unknown';
+  const due = asDate(data['followUpAt']);
+  return {
+    ...(choice === 'self' || choice === 'proxy' || choice === 'not_now' ? { choice } : {}),
+    state,
+    followUp:
+      state === 'supported' || state === 'paused' || data['followUpAnsweredAt'] || data['closedAt']
+        ? 'stopped'
+        : due && Number.isFinite(due.getTime())
+          ? due > now
+            ? 'scheduled'
+            : 'due'
+          : 'unscheduled',
+  };
+}
+
 export async function readChildContext(
   db: Firestore,
   kb: Kb,
   child: ChildRecord,
   now = new Date(),
+  sessions?: FirestoreSessionService,
 ): Promise<ChildContext> {
   const base = childPath(child.familyId, child.childId);
   const data = (await db.doc(base).get()).data() ?? {};
-  const consultations = await db
-    .collection(`${base}/consultations`)
-    .orderBy('offeredAt', 'desc')
-    .limit(agent.contextHistoryTurns)
-    .get();
-  const pending = consultations.docs.find((d) => consultationPending(d.data(), now));
+  const collection = db.collection(`${base}/consultations`);
+  // An older attempt can have the newest child answer. Each query uses a single-field index.
+  const snapshots = await Promise.all(
+    ['offeredAt', 'choiceAt', 'followUpUpdatedAt'].map((field) =>
+      collection.orderBy(field, 'desc').limit(agent.contextHistoryTurns).get(),
+    ),
+  );
+  const consultations = [
+    ...new Map(snapshots.flatMap((s) => s.docs).map((d) => [d.id, d])).values(),
+  ].sort(
+    (a, b) =>
+      attemptTime(b.data()) - attemptTime(a.data()) ||
+      dateTime(b.get('offeredAt')) - dateTime(a.get('offeredAt')) ||
+      a.id.localeCompare(b.id),
+  );
+  const pending = consultations.find((d) => consultationPending(d.data(), now));
   const jst = jstParts(now);
   const holidays = await kb.yaml('resources/jp_holidays.yaml', holidaysSchema);
   const contextEvents = await db
     .collection(`families/${child.familyId}/contextEvents`)
     .where('childIds', 'array-contains', child.childId)
+    .where('endDate', '>=', jst.date)
     .get();
   const vacation = contextEvents.docs.some((d) => {
     const e = d.data();
@@ -61,15 +147,33 @@ export async function readChildContext(
   });
   // Only a separately approved, non-quoted summary may enter model context.
   const summary = data['agentSummary'] as
-    { approved?: boolean; text?: unknown; expiresAt?: unknown } | undefined;
+    | { approved?: boolean; petId?: string; text?: unknown; textEnc?: unknown; expiresAt?: unknown }
+    | undefined;
   const summaryExpiry = asDate(summary?.expiresAt);
-  let recentTrend =
+  let recentTrend = '';
+  if (
     summary?.approved === true &&
-    typeof summary.text === 'string' &&
-    summaryExpiry !== undefined &&
+    summary.petId === child.petId &&
+    (!data['activePetId'] || data['activePetId'] === child.petId) &&
+    summaryExpiry &&
     summaryExpiry > now
-      ? summary.text.slice(0, agent.contextStatusChars)
-      : '';
+  ) {
+    try {
+      recentTrend = (
+        summary.textEnc && sessions
+          ? sessions.decryptForChild(
+              child,
+              Buffer.from(summary.textEnc as Uint8Array),
+              `${base}#agentSummary.textEnc`,
+            )
+          : typeof summary.text === 'string'
+            ? summary.text
+            : ''
+      ).slice(0, agent.contextStatusChars);
+    } catch {
+      // Corrupt or wrong-child ciphertext never becomes prompt text.
+    }
+  }
   if (!recentTrend) {
     const report = (
       await db.collection(`${base}/weeklyReports`).orderBy('generatedAt', 'desc').limit(1).get()
@@ -109,6 +213,7 @@ export async function readChildContext(
     recentTrend,
     careFlag: data['careFlag'] === true,
   };
+  if (consultations[0]) result.helpAttempt = helpAttempt(consultations[0].data(), now);
   if (pending) {
     result.pendingConsultationId = pending.id;
     const due = asDate(pending.data()['followUpAt']);

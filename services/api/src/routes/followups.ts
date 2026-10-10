@@ -14,10 +14,16 @@ type Kind = 'consultation' | 'crisis';
 function followupDue(kind: Kind, data: DocumentData): Date | undefined {
   if (data['followUpAnsweredAt']) return undefined;
   if (kind === 'crisis') {
+    const scheduled = storedDate(data['followUpAt']);
+    if (scheduled) return scheduled;
     const created = storedDate(data['createdAt']);
     return created ? new Date(created.getTime() + 86_400_000) : undefined;
   }
-  if (data['crisisId'] || (data['choice'] !== 'self' && data['choice'] !== 'not_now'))
+  if (
+    data['closedAt'] ||
+    data['crisisId'] ||
+    !['self', 'proxy', 'not_now'].includes(data['choice'])
+  )
     return undefined;
   if (
     data['choice'] === 'not_now' &&
@@ -48,7 +54,7 @@ export function registerFollowups(app: ServiceApp, getDeps: () => Promise<ChatDe
         const due = followupDue(kind, doc.data());
         if (!due || due > now) continue;
         items.push({
-          followupId: `${kind}-${doc.id}`,
+          followupId: `${kind}-${doc.id}${doc.get('followUpRound') ? `~${doc.get('followUpRound')}` : ''}`,
           kind,
           dueAt: due.toISOString(),
           ...(kind === 'crisis' ? { crisisId: doc.id } : { consultationId: doc.id }),
@@ -61,14 +67,17 @@ export function registerFollowups(app: ServiceApp, getDeps: () => Promise<ChatDe
 
   r.post('/:id/answer', async (c) => {
     const parsed = z
-      .strictObject({ answer: z.enum(['talked', 'need_help', 'not_now']) })
+      .strictObject({ answer: z.enum(['talked', 'need_help', 'not_now', 'supported']) })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new ApiHttpError('INVALID_ARGUMENT', '回答の形式が正しくありません');
     const id = c.req.param('id');
-    const match = /^(consultation|crisis)-(.+)$/.exec(id);
+    const match = /^(consultation|crisis)-([a-zA-Z0-9_-]+)(?:~([1-9][0-9]*))?$/.exec(id);
     if (!match) throw new ApiHttpError('INVALID_ARGUMENT', 'ID の形式が正しくありません');
     const kind = match[1] as Kind;
     const sourceId = resourceId(match[2]!);
+    const round = Number(match[3] ?? 0);
+    if (!Number.isSafeInteger(round) || round >= consultation.followUpMaxRounds)
+      throw new ApiHttpError('INVALID_ARGUMENT', 'フォローの回数が正しくありません');
     const deps = await getDeps();
     const { child, base, ref: childRef } = await childOwner(deps, c.get('child').childId);
     const source = deps.db.doc(
@@ -85,38 +94,75 @@ export function registerFollowups(app: ServiceApp, getDeps: () => Promise<ChatDe
       if (previous.exists) {
         if (previous.get('answer') !== parsed.data.answer)
           throw new ApiHttpError('ALREADY_EXISTS', '回答済みです');
-        return {
-          status: 'answered',
-          ...(previous.get('consultationId')
-            ? { consultationId: previous.get('consultationId') as string }
-            : {}),
-        };
+        return (
+          (previous.get('result') as FollowupAnswerRes | undefined) ?? {
+            status: 'answered',
+            ...(previous.get('consultationId')
+              ? { consultationId: previous.get('consultationId') as string }
+              : {}),
+          }
+        );
       }
       if (!snap.exists) throw new ApiHttpError('NOT_FOUND', 'フォローが見つかりません');
+      if (Number(snap.get('followUpRound') ?? 0) !== round)
+        throw new ApiHttpError('ALREADY_EXISTS', '新しいフォローを開いてください');
       const due = followupDue(kind, snap.data()!);
       if (!due || due > new Date())
         throw new ApiHttpError('INVALID_ARGUMENT', '今は回答できません');
       const consultationId = parsed.data.answer === 'need_help' ? next.id : undefined;
+      const now = new Date();
+      const schedule =
+        ['talked', 'not_now'].includes(parsed.data.answer) &&
+        round + 1 < consultation.followUpMaxRounds;
+      const nextAt = new Date(now.getTime() + consultation.l2FollowUpDays * 86_400_000);
+      const continuation = consultationId
+        ? 'help_requested'
+        : parsed.data.answer === 'supported'
+          ? 'supported'
+          : schedule
+            ? 'scheduled'
+            : 'paused';
+      const response: FollowupAnswerRes = {
+        status: 'answered',
+        continuation,
+        ...(consultationId ? { consultationId } : {}),
+        ...(schedule ? { dueAt: nextAt.toISOString() } : {}),
+      };
       if (consultationId)
         tx.create(next, {
           assessmentId: 'child-followup',
           level: 'l2',
           source: 'child_followup',
-          offeredAt: new Date(),
+          offeredAt: now,
           offerCount: 1,
           previousFollowupId: id,
+          followUpReason: 'need_help',
           familyHarmSuspected: snap.get('familyHarmSuspected') === true,
         });
       tx.create(receipt, {
         kind,
         sourceId,
         answer: parsed.data.answer,
-        answeredAt: new Date(),
+        answeredAt: now,
+        result: response,
         ...(consultationId ? { consultationId } : {}),
       });
-      tx.update(source, { followUpAnsweredAt: new Date(), followUpAt: FieldValue.delete() });
+      tx.update(source, {
+        followUpAnswer: parsed.data.answer,
+        followUpState: consultationId
+          ? 'needs_help'
+          : schedule
+            ? parsed.data.answer === 'talked'
+              ? 'talked'
+              : 'later'
+            : continuation,
+        followUpUpdatedAt: now,
+        followUpRound: round + 1,
+        followUpAnsweredAt: schedule ? FieldValue.delete() : now,
+        followUpAt: schedule ? nextAt : FieldValue.delete(),
+      });
       // A child's follow-up answer is not evidence that a crisis has been professionally resolved.
-      return { status: 'answered', ...(consultationId ? { consultationId } : {}) };
+      return response;
     });
     return c.json(result);
   });

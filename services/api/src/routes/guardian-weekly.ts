@@ -1,4 +1,5 @@
-import type { WeeklyReportRes } from '@ijime/api-types';
+import type { WeeklyReportRes, WeeklyReportsRes } from '@ijime/api-types';
+import { isCrisisActive } from '@ijime/config';
 import { ApiHttpError, type ServiceApp, type ServiceEnv } from '@ijime/service-kit';
 import type { Hono } from 'hono';
 import { z } from 'zod';
@@ -34,11 +35,18 @@ export function registerGuardianWeekly(
     const { familyId, guardianId } = c.get('guardian');
     const childId = resourceId(c.req.param('childId'));
     const week = c.req.query('week');
+    const weeksParam = c.req.query('weeks');
     if (week !== undefined && !weekSchema.safeParse(week).success)
       throw new ApiHttpError('INVALID_ARGUMENT', '週を選び直してください');
+    const weeks = weeksParam === undefined ? undefined : Number.parseInt(weeksParam, 10);
+    if (
+      weeksParam !== undefined &&
+      (!Number.isInteger(weeks) || weeks! < 1 || weeks! > 12 || week !== undefined)
+    )
+      throw new ApiHttpError('INVALID_ARGUMENT', '期間を選び直してください');
     const root = db.doc(`families/${familyId}/children/${childId}`);
     const body = await db.runTransaction(
-      async (tx): Promise<WeeklyReportRes> => {
+      async (tx): Promise<WeeklyReportRes | WeeklyReportsRes> => {
         const family = await tx.get(db.doc(`families/${familyId}`));
         const guardian = await tx.get(db.doc(`families/${familyId}/guardians/${guardianId}`));
         const role = guardian.get('role');
@@ -62,11 +70,32 @@ export function registerGuardianWeekly(
         if (
           crises.docs.some(
             (crisis) =>
-              crisis.get('status') !== 'closed' && crisis.get('familyHarmSuspected') !== false,
+              isCrisisActive(crisis.data(), new Date()) &&
+              crisis.get('familyHarmSuspected') !== false,
           )
         )
           throw new ApiHttpError('NOT_FOUND', 'この週の記録はまだありません');
         const reports = root.collection('weeklyReports');
+        if (weeks !== undefined) {
+          const snapshots = await tx.get(reports.orderBy('weekStart', 'desc').limit(weeks));
+          const items = snapshots.docs
+            .filter((report) => weekSchema.safeParse(report.id).success)
+            .flatMap((report) => {
+              const parsed = reportSchema.safeParse(report.data());
+              return parsed.success
+                ? [
+                    {
+                      weekId: report.id,
+                      vitality: parsed.data.vitality,
+                      summaryText: parsed.data.summaryText,
+                    },
+                  ]
+                : [];
+            });
+          if (items.length === 0)
+            throw new ApiHttpError('NOT_FOUND', 'この期間の記録はまだありません');
+          return { items };
+        }
         const report = week
           ? await tx.get(reports.doc(week))
           : (await tx.get(reports.orderBy('weekStart', 'desc').limit(1))).docs[0];

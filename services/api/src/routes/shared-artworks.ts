@@ -6,7 +6,7 @@ import {
   type Transaction,
 } from '@google-cloud/firestore';
 import type { SharedArtworksRes } from '@ijime/api-types';
-import { limits } from '@ijime/config';
+import { isCrisisActive, limits } from '@ijime/config';
 import { ApiHttpError, type ServiceApp, type ServiceEnv } from '@ijime/service-kit';
 import type { Hono } from 'hono';
 
@@ -42,7 +42,9 @@ export async function artworkFamilySafe(
   const crises = await tx.get(db.collection(`${base}/crisisEvents`).limit(limits.pageSize.max + 1));
   return (
     crises.size <= limits.pageSize.max &&
-    !crises.docs.some((d) => d.get('status') !== 'closed' && d.get('familyHarmSuspected') !== false)
+    !crises.docs.some(
+      (d) => isCrisisActive(d.data(), new Date()) && d.get('familyHarmSuspected') !== false,
+    )
   );
 }
 

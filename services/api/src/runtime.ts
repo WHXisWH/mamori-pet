@@ -5,6 +5,7 @@ import {
   LocalChildDirectory,
   FirestoreChildDirectory,
   FirestoreSessionService,
+  ScopedChildDirectory,
   type ChildDirectory,
 } from '@ijime/agent-core';
 import { loadEnv, models } from '@ijime/config';
@@ -26,12 +27,18 @@ import {
   loadGames,
   openingsSchema,
   petRequestRepliesSchema,
+  safeRepliesSchema,
 } from '@ijime/kb-loader';
 import type { PubSubTopic } from '@ijime/api-types';
 import {
+  AdcGoogleHttp,
+  CloudTasksRestQueue,
+  crisisRecheckRequesterFromEnv,
   GoogleCalendarApi,
   Logger,
+  MemoryTaskQueue,
   PubSubRestPublisher,
+  type TaskQueue,
   type OAuthClientConfig,
 } from '@ijime/service-kit';
 
@@ -40,20 +47,25 @@ import type { ChatDeps } from './chat.js';
 import { createRuntimeDetector, loadSafeModeCopy } from '@ijime/crisis-detector';
 import { petAgentClientFromEnv, type PetAgentClient } from './pet-agent-client.js';
 import type { CalendarRoutesDeps } from './routes/calendar.js';
+import type { DeletionDeps } from './routes/deletion.js';
 import { loadHelpResources } from './routes/help-resources.js';
 import type { NotificationRoutesDeps } from './routes/notifications.js';
+import type { ProactiveRoutesDeps } from './routes/proactive.js';
 import type { SubmissionDeps } from './routes/submissions.js';
 import type { AccountDeps } from './routes/accounts.js';
 import { emailReauthConsentVerifier, identityPlatformIssuer } from './issuer.js';
+import { firebaseAppCheckVerifier } from './auth.js';
 
 export type ApiRuntime = {
   kb: Kb;
   chat: ChatDeps;
   submissions: SubmissionDeps;
   guardian: NotificationRoutesDeps;
+  guardianDeletion: DeletionDeps;
   accounts: AccountDeps;
   // Google OAuth クライアントが未設定のとき（ローカル開発）は空
   calendar?: CalendarRoutesDeps;
+  proactive: ProactiveRoutesDeps;
 };
 
 function oauthClient(prod: boolean): OAuthClientConfig | undefined {
@@ -120,6 +132,8 @@ export async function createApiRuntime(
     Partial<Pick<SubmissionDeps, 'images' | 'artworkFeatures' | 'now'>> & {
       kb?: Kb;
       accounts?: Partial<AccountDeps>;
+      proactiveQueue?: TaskQueue;
+      proactiveDispatchToken?: string;
     } = {},
 ): Promise<ApiRuntime> {
   const env = loadEnv();
@@ -160,8 +174,29 @@ export async function createApiRuntime(
     }
   }
 
+  // 同じリクエスト内でルートとセッションサービスが child を何度も読む：1回だけ読む
+  directory = new ScopedChildDirectory(directory);
   const sessions = overrides.sessions ?? new FirestoreSessionService(db, directory);
-  const detector = overrides.detector ?? (await createRuntimeDetector(kb));
+  const detector =
+    overrides.detector ??
+    (await createRuntimeDetector(kb, process.env, {
+      onModelEvent: (e) =>
+        logger.warn('crisis.model_unavailable', {
+          layer: e.layer,
+          kind: e.kind,
+          ...(e.reason ? { reason: e.reason } : {}),
+        }),
+    }));
+  const pausedReplies =
+    overrides.pausedReplies ??
+    (await kb.yaml('templates/model_unavailable.ja.yaml', safeRepliesSchema)).replies;
+  const requestRecheck =
+    overrides.requestRecheck ??
+    crisisRecheckRequesterFromEnv({
+      prod: env.NODE_ENV === 'production',
+      projectId: env.GCP_PROJECT_ID,
+      location: env.GCP_REGION,
+    });
   const petAgent: PetAgentClient =
     overrides.petAgent ?? petAgentClientFromEnv(env.NODE_ENV === 'production');
   const openings =
@@ -180,7 +215,23 @@ export async function createApiRuntime(
       };
     }
   }
-  const auth = overrides.auth ?? { allowDevHeader: env.NODE_ENV !== 'production' };
+  const auth =
+    overrides.auth ??
+    ({
+      allowDevHeader: env.NODE_ENV !== 'production',
+      // App Check は reCAPTCHA の site key を設定したときだけ強制する（Terraform が site key と合わせて APP_CHECK_REQUIRED を設定する）。
+      // 未設定のまま強制すると、両アプリのすべてのリクエストが 401 になる（2026-10-10 決定）
+      ...(env.NODE_ENV === 'production' &&
+      env.GCP_PROJECT_ID &&
+      process.env['APP_CHECK_REQUIRED'] === 'true'
+        ? {
+            appCheck: {
+              required: true,
+              verifyToken: firebaseAppCheckVerifier(env.GCP_PROJECT_ID),
+            },
+          }
+        : {}),
+    } satisfies ChatDeps['auth']);
 
   const calendar = await createCalendarDeps(env, db, logger);
 
@@ -191,6 +242,26 @@ export async function createApiRuntime(
   // 作品特徴のリトライは最大1回。そこにネットワークの余裕を少し足す
   const featureTimeoutMs = (models.artworkFeature.timeoutMs ?? 30000) * 2 + 10_000;
 
+  const petAgentUrl = process.env['PET_AGENT_URL'] ?? 'http://localhost:8082';
+  const proactiveDispatchToken =
+    overrides.proactiveDispatchToken ?? process.env['PROACTIVE_DISPATCH_TOKEN'];
+  let proactiveQueue = overrides.proactiveQueue;
+  if (!proactiveQueue) {
+    if (!prod) proactiveQueue = new MemoryTaskQueue();
+    else {
+      const invoker = process.env['TASKS_INVOKER_SA'];
+      if (!env.GCP_PROJECT_ID || !invoker || !petAgentUrl)
+        throw new Error('missing env GCP_PROJECT_ID / TASKS_INVOKER_SA / PET_AGENT_URL');
+      proactiveQueue = new CloudTasksRestQueue({
+        projectId: env.GCP_PROJECT_ID,
+        location: env.GCP_REGION,
+        invokerServiceAccount: invoker,
+        audience: petAgentUrl,
+        http: new AdcGoogleHttp(),
+      });
+    }
+  }
+
   const submissions: SubmissionDeps = {
     db,
     sessions,
@@ -198,6 +269,7 @@ export async function createApiRuntime(
     detector,
     safeModeCopy,
     hotlines,
+    pausedReplies,
     auth,
     logger,
     publish,
@@ -237,7 +309,14 @@ export async function createApiRuntime(
     },
     submissions,
     guardian: { db, auth },
+    guardianDeletion: { db, auth, publish },
     ...(calendar ? { calendar } : {}),
+    proactive: {
+      db,
+      queue: proactiveQueue,
+      petAgentUrl,
+      ...(proactiveDispatchToken ? { dispatchToken: proactiveDispatchToken } : {}),
+    },
     chat: {
       db,
       sessions,
@@ -248,6 +327,8 @@ export async function createApiRuntime(
       safeModeCopy,
       hotlines,
       coaching,
+      pausedReplies,
+      requestRecheck,
       auth,
       logger,
       publish,

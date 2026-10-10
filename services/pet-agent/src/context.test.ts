@@ -49,6 +49,61 @@ describe('context guards', () => {
     expect(() => modelMode({ PET_MODEL_MODE: 'typo' })).toThrow('invalid');
     expect(modelMode({ PET_MODEL_MODE: 'scripted' })).toBe('scripted');
   });
+  it.each([{}, { followUpAnswer: 'not_now', followUpState: 'later', followUpRound: 1 }])(
+    'allows only a child-initiated early return to an unfinished not_now attempt: %j',
+    (followup) => {
+      const now = new Date('2026-10-07');
+      const data = {
+        level: 'l2',
+        choice: 'not_now',
+        offerCount: 1,
+        followUpAt: new Date('2026-10-10'),
+        ...followup,
+      };
+      expect(consultationPending(data, now)).toBe(false);
+      expect(consultationPending(data, now, { childInitiated: true })).toBe(true);
+    },
+  );
+  it.each([
+    { followUpAnsweredAt: new Date(0) },
+    { followUpState: 'supported' },
+    { followUpState: 'paused' },
+    { followUpState: 'needs_help' },
+    { closedAt: new Date(0) },
+    { notificationId: 'sent' },
+    { crisisId: 'crisis' },
+    { familyHarmSuspected: true },
+    { level: 'l3' },
+  ])('does not resume a terminal or unsafe attempt: %j', (guard) => {
+    const data = {
+      level: 'l2',
+      choice: 'not_now',
+      offerCount: 1,
+      followUpAt: new Date(0),
+      ...guard,
+    };
+    expect(consultationPending(data, new Date(), { childInitiated: true })).toBe(false);
+  });
+  it.each([
+    { followUpAnsweredAt: new Date(0) },
+    { followUpAnswer: 'talked' },
+    { followUpAnswer: 'not_now' },
+    { followUpState: 'supported' },
+    { followUpState: 'paused' },
+  ])('does not re-offer an answered consultation: %j', (answer) => {
+    expect(
+      consultationPending(
+        {
+          choice: 'not_now',
+          level: 'l2',
+          offerCount: 1,
+          followUpAt: new Date(0),
+          ...answer,
+        },
+        new Date(),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe('event publisher configuration', () => {

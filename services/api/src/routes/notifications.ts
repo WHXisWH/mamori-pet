@@ -11,10 +11,12 @@ import type {
   NotificationKind,
   NotificationsRes,
   NotificationSummary,
+  NotificationFeedbackRes,
 } from '@ijime/api-types';
-import { limits } from '@ijime/config';
+import { ACTIVE_CRISIS_STATUSES, isCrisisActive, limits } from '@ijime/config';
 import { ApiHttpError, type ServiceApp, type ServiceEnv } from '@ijime/service-kit';
 import type { Hono } from 'hono';
+import { z } from 'zod';
 
 import { guardianAuth, type AuthOptions, type GuardianAuthEnv } from '../auth.js';
 import { resourceId } from './workflow-store.js';
@@ -35,6 +37,7 @@ type StoredNotification = {
     reason?: { domains: string[]; days: number };
   };
   acknowledgedAt?: { toDate(): Date };
+  feedback?: { action: 'talked' | 'planned' | 'need_help'; updatedAt: { toDate(): Date } };
   createdAt: { toDate(): Date };
 };
 
@@ -96,6 +99,14 @@ function detail(id: string, n: StoredNotification): NotificationDetail {
     childSummary: n.payload.childSummary ?? null,
     resources: n.payload.resources ?? [],
     reason: n.payload.reason ?? { domains: [], days: 0 },
+    ...(n.feedback
+      ? {
+          feedback: {
+            action: n.feedback.action,
+            updatedAt: n.feedback.updatedAt.toDate().toISOString(),
+          },
+        }
+      : {}),
   };
 }
 
@@ -110,9 +121,12 @@ async function canReadChildNotifications(
   const child = await tx.get(db.doc(base));
   if (child.get('status') !== 'active') return false;
   const active = await tx.get(
-    db.collection(`${base}/crisisEvents`).where('status', 'in', ['open', 'guardian_acknowledged']),
+    db.collection(`${base}/crisisEvents`).where('status', 'in', ACTIVE_CRISIS_STATUSES),
   );
-  return !active.docs.some((d) => d.get('familyHarmSuspected') !== false);
+  const now = new Date();
+  return !active.docs.some(
+    (d) => isCrisisActive(d.data(), now) && d.get('familyHarmSuspected') !== false,
+  );
 }
 
 export function registerNotifications(
@@ -192,6 +206,31 @@ export function registerNotifications(
     const { familyId, guardianId } = c.get('guardian');
     const { n } = await load(db, familyId, guardianId, c.req.param('notificationId'));
     return c.json(detail(c.req.param('notificationId'), n));
+  });
+
+  r.put('/:notificationId/feedback', async (c) => {
+    const parsed = z
+      .strictObject({ action: z.enum(['talked', 'planned', 'need_help']) })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiHttpError('INVALID_ARGUMENT', '回答の形式が正しくありません');
+    const { db } = await getDeps();
+    const { familyId, guardianId } = c.get('guardian');
+    const { snap } = await load(db, familyId, guardianId, c.req.param('notificationId'));
+    const feedback = await db.runTransaction(async (tx) => {
+      await recheckGuardian(tx, db, familyId, guardianId);
+      const n = (await tx.get(snap.ref)).data() as StoredNotification | undefined;
+      if (
+        !n ||
+        !n.recipientIds.includes(guardianId) ||
+        !(await canReadChildNotifications(tx, db, familyId, n.childId))
+      )
+        throw new ApiHttpError('NOT_FOUND', 'お知らせが見つかりません');
+      const value = { action: parsed.data.action, updatedAt: new Date() };
+      // Adult self-report is neither acknowledgement nor evidence of a resolved incident.
+      tx.update(snap.ref, { feedback: value });
+      return { action: value.action, updatedAt: value.updatedAt.toISOString() };
+    });
+    return c.json({ feedback } satisfies NotificationFeedbackRes);
   });
 
   r.post('/:notificationId/ack', async (c) => {

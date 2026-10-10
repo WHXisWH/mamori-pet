@@ -1,6 +1,7 @@
 import { Firestore } from '@google-cloud/firestore';
-import { DevChildDirectory } from '@ijime/agent-core';
+import { addVoiceSeconds, DevChildDirectory, VOICE_FLAG_DOC } from '@ijime/agent-core';
 import type { VoiceTicketRes } from '@ijime/api-types';
+import { voice } from '@ijime/config';
 import { VOICE_TICKETS, tokenDigest } from '@ijime/service-kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -62,5 +63,38 @@ describe('POST /v1/child/voice/tickets', () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
       'DATA_SOURCE_DISABLED',
     );
+  });
+
+  it('refuses every child while voice is switched off globally', async () => {
+    await db.doc(VOICE_FLAG_DOC).set({ disabled: true, reason: 'budget' });
+    try {
+      const res = await app.request('/v1/child/voice/tickets', {
+        method: 'POST',
+        headers: H('c_voice_on'),
+      });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+        'MODEL_UNAVAILABLE',
+      );
+    } finally {
+      await db.doc(VOICE_FLAG_DOC).delete();
+    }
+  });
+
+  it('refuses once the child used up today’s voice minutes', async () => {
+    const directory = new DevChildDirectory(db);
+    const child = (await directory.lookup('c_voice_spent'))!;
+    await addVoiceSeconds(db, child, new Date(), voice.dailyMinutesPerChild * 60);
+    const res = await app.request('/v1/child/voice/tickets', {
+      method: 'POST',
+      headers: H('c_voice_spent'),
+    });
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('RATE_LIMITED');
+    const fresh = await app.request('/v1/child/voice/tickets', {
+      method: 'POST',
+      headers: H('c_voice_on'),
+    });
+    expect(fresh.status).toBe(200);
   });
 });

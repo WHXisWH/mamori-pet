@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,7 +25,7 @@ const logLines: string[] = [];
 
 beforeAll(async () => {
   if (!process.env['FIRESTORE_EMULATOR_HOST']) throw new Error('needs Firestore emulator');
-  db = new Firestore({ projectId: 'demo-ijime' });
+  db = new Firestore({ projectId: `demo-consultations-${randomUUID()}` });
   const kb = await Kb.load(new FsKbSource(KB_DIR));
   directory = new DevChildDirectory(db);
   const rt = await createApiRuntime({

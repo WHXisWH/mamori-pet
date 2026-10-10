@@ -1,11 +1,12 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 
-import { createServiceApp, type ServiceEnv } from '@ijime/service-kit';
+import { createServiceApp, type GoogleHttp, type ServiceEnv } from '@ijime/service-kit';
 import type { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   childAuth,
+  firebaseAppCheckVerifier,
   firebaseTokenVerifier,
   guardianAuth,
   type AuthEnv,
@@ -63,6 +64,17 @@ function testApp(opts: AuthOptions) {
 }
 
 describe('Firebase Bearer verification', () => {
+  it('sends App Check tokens to the official verifier endpoint', async () => {
+    const request = vi.fn(async () => ({}));
+    const verify = firebaseAppCheckVerifier(project, { request } as GoogleHttp);
+    await verify('app-check-token');
+    expect(request).toHaveBeenCalledWith({
+      method: 'POST',
+      url: `https://firebaseappcheck.googleapis.com/v1beta/projects/${project}:verifyAppCheckToken`,
+      body: { appCheckToken: 'app-check-token' },
+    });
+  });
+
   it('verifies an RSA signed Firebase token and caches the Google certificates', async () => {
     const { verify, fetcher } = verifier();
     expect(await verify(token())).toMatchObject({
@@ -113,6 +125,29 @@ describe('Firebase Bearer verification', () => {
 });
 
 describe('role and identity binding', () => {
+  it('requires App Check for authenticated child and guardian requests', async () => {
+    const { verify } = verifier();
+    const checked = vi.fn(async (value: string) => {
+      if (value !== 'valid-app') throw new Error('invalid');
+    });
+    const app = testApp({
+      allowDevHeader: false,
+      verifyIdToken: verify,
+      appCheck: { required: true, verifyToken: checked },
+    });
+    expect(
+      (await app.request('/child', { headers: { Authorization: `Bearer ${token()}` } })).status,
+    ).toBe(401);
+    expect(
+      (
+        await app.request('/child', {
+          headers: { Authorization: `Bearer ${token()}`, 'X-Firebase-AppCheck': 'valid-app' },
+        })
+      ).status,
+    ).toBe(200);
+    expect(checked).toHaveBeenCalledWith('valid-app');
+  });
+
   it('uses the signed child claim and ignores conflicting development and query IDs', async () => {
     const { verify } = verifier();
     const app = testApp({ allowDevHeader: false, verifyIdToken: verify });

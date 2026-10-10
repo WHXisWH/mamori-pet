@@ -1,7 +1,7 @@
 import type { Firestore } from '@google-cloud/firestore';
 import { agent, limits, rateLimit } from '@ijime/config';
 import type { CrisisCheck, CrisisDetector, CrisisInput } from '@ijime/crisis-detector';
-import { ApiHttpError } from '@ijime/service-kit';
+import { ApiHttpError, createRateLimiter, type RateLimiter } from '@ijime/service-kit';
 
 // 費用の上限。モデルは動的な共有クォータで動き、Google 側にはプロジェクト単位の上限がない。
 // そのため、モデル呼び出しを起こす子ども側の入口は、すべて先にここを通す。
@@ -9,37 +9,7 @@ import { ApiHttpError } from '@ijime/service-kit';
 const REST_MESSAGE = '今日は少し休けいしよう。困ったときの連絡先はいつでも開けるよ。';
 const SLOW_DOWN_MESSAGE =
   '少し待ってから、もう一度送ってね。困ったときの連絡先はいつでも開けるよ。';
-const WINDOW_MS = 60_000;
-const MAX_TRACKED_KEYS = 10_000;
-
-export type RateLimiter = { allow(key: string): boolean };
-
-// プロセス内の固定ウィンドウでのカウント。インスタンスごとに別々に数えるため、実際の上限は limit × インスタンス数になる。
-// 目的はスクリプトによる大量リクエストを止めることで、厳密なクォータではない（厳密な1日の上限は Firestore にある）。
-export function createRateLimiter(
-  limit: number,
-  windowMs: number = WINDOW_MS,
-  now: () => number = Date.now,
-): RateLimiter {
-  const windows = new Map<string, { startedAt: number; count: number }>();
-  return {
-    allow(key) {
-      const at = now();
-      const current = windows.get(key);
-      if (!current || at - current.startedAt >= windowMs) {
-        if (windows.size >= MAX_TRACKED_KEYS) {
-          for (const [k, w] of windows) if (at - w.startedAt >= windowMs) windows.delete(k);
-          if (windows.size >= MAX_TRACKED_KEYS) windows.clear();
-        }
-        windows.set(key, { startedAt: at, count: 1 });
-        return true;
-      }
-      if (current.count >= limit) return false;
-      current.count += 1;
-      return true;
-    },
-  };
-}
+export { createRateLimiter, type RateLimiter } from '@ijime/service-kit';
 
 const jstDate = (now: Date) => new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 
@@ -78,13 +48,12 @@ export type BudgetDeps = {
 
 const defaultLimiter = createRateLimiter(rateLimit.childModelRequestsPerMinute);
 
-// 上限に達しているときにキーワードがヒットした場合の結果：危機として扱い、カテゴリは不明とする。検知器が再確認のタイムアウト時に取る保守的な値と同じ
-// （家庭が安全かどうか分からないときは、保護者にそっと通知せず、まず家庭外の相談先を示す）。
+// 上限に達しているときにキーワードがヒットした場合の結果：危機として扱う。モデルの分類は得られないため、カテゴリは other とする（保護者に通知する。2026-10-05 決定）
 const KEYWORD_HIT_WITHOUT_MODEL: CrisisCheck = {
   availability: 'unavailable',
   hit: true,
-  category: 'none',
-  familyHarmSuspected: true,
+  category: 'other',
+  familyHarmSuspected: false,
   method: 'keyword',
   keywordMatched: true,
   confidence: 0,
@@ -108,6 +77,12 @@ export async function checkWithinBudget(
   if (withinBudget) return deps.detector.check(input);
   if (deps.detector.keywordOnly(input.text)) return { ...KEYWORD_HIT_WITHOUT_MODEL };
   throw new ApiHttpError('RATE_LIMITED', perMinute ? REST_MESSAGE : SLOW_DOWN_MESSAGE);
+}
+
+// 作品の語りや大人向けの要約など、メッセージとして保存しない入力：モデルが使えないときはその場で拒否し、内容は保存せず誰にも渡さない。
+// 子どもは定型文を受け取ってから再提出する（会話メッセージは保存して再審査する。chat.ts を参照）
+export function rejectPaused(message: string): never {
+  throw new ApiHttpError('MODEL_UNAVAILABLE', message);
 }
 
 export async function consumeArtwork(db: Firestore, childBase: string, now: Date): Promise<void> {

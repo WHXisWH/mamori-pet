@@ -13,7 +13,7 @@ import type {
 import { CONSULT_CHOICES } from '@ijime/api-types';
 import { consultation as consultConfig, limits } from '@ijime/config';
 import { fieldAad } from '@ijime/crypto';
-import { crisisResponse } from '@ijime/crisis-detector';
+import { crisisResponse, isPaused, routingOfCheck, routingOfRecord } from '@ijime/crisis-detector';
 import { ApiHttpError, stableId, type ServiceApp, type ServiceEnv } from '@ijime/service-kit';
 import type { Hono } from 'hono';
 import { z } from 'zod';
@@ -22,7 +22,7 @@ import { childAuth, type AuthEnv } from '../auth.js';
 import type { ChatDeps } from '../chat.js';
 import { consultationIsPending } from './child-profile.js';
 import { childOwner, resourceId, storedDate } from './workflow-store.js';
-import { checkWithinBudget } from '../model-budget.js';
+import { checkWithinBudget, rejectPaused } from '../model-budget.js';
 import { activeCrisisPayload, activeCrisisQuery, readActiveCrisis } from './workflow-safety.js';
 
 const choiceSchema = z.object({
@@ -77,8 +77,26 @@ export function registerConsultations(app: ServiceApp, getDeps: () => Promise<Ch
       if (owner.get('status') !== 'active')
         throw new ApiHttpError('PERMISSION_DENIED', '利用できません');
       if (existing.exists) return { consultationId: existing.id };
-      const pending = recent.docs.find((d) => consultationIsPending(d.data()));
-      if (pending) return { consultationId: pending.id };
+      const now = new Date();
+      const pending = recent.docs.find((d) =>
+        consultationIsPending(d.data(), now, { childInitiated: true }),
+      );
+      if (pending) {
+        if (pending.get('choice') === 'not_now') {
+          tx.update(pending.ref, {
+            choice: FieldValue.delete(),
+            choiceAt: FieldValue.delete(),
+            followUpAt: FieldValue.delete(),
+            followUpAnswer: FieldValue.delete(),
+            followUpState: FieldValue.delete(),
+            followUpUpdatedAt: FieldValue.delete(),
+            offeredAt: now,
+            offerCount: Number(pending.get('offerCount') ?? 1) + 1,
+          });
+          tx.update(ref, { consultationRevision: FieldValue.increment(1) });
+        }
+        return { consultationId: pending.id };
+      }
       tx.create(target, {
         assessmentId: 'child-request',
         level: 'l2',
@@ -158,13 +176,12 @@ export function registerConsultations(app: ServiceApp, getDeps: () => Promise<Ch
         throw new ApiHttpError('ALREADY_EXISTS', 'consultation already answered');
       if (existing.crisisId) {
         const event = (await deps.db.doc(`${base}/crisisEvents/${existing.crisisId}`).get()).data();
-        const familyHarmSuspected = event?.['familyHarmSuspected'] !== false;
         return c.json({
           notificationQueued: false,
           crisis: {
             crisisId: existing.crisisId,
             ...crisisResponse({
-              familyHarmSuspected,
+              familyHarmSuspected: routingOfRecord(event ?? {}).familyHarmSuspected,
               gradeBand: child.gradeBand,
               copy: deps.safeModeCopy,
               hotlines: deps.hotlines,
@@ -196,6 +213,7 @@ export function registerConsultations(app: ServiceApp, getDeps: () => Promise<Ch
         category: check.category,
         latencyMs: Math.round(check.latencyMs),
       });
+      if (isPaused(check)) rejectPaused(deps.pausedReplies[child.gradeBand]);
       if (check.hit) {
         const crisisRef = deps.db.doc(
           `${base}/crisisEvents/consult-${stableId(childId, consultationId)}`,
@@ -227,7 +245,7 @@ export function registerConsultations(app: ServiceApp, getDeps: () => Promise<Ch
                 confidence: check.confidence,
                 availability: check.availability ?? 'verified',
               },
-              familyHarmSuspected: check.familyHarmSuspected,
+              ...routingOfCheck(check),
               timeline: [{ step: 'safe_mode_shown', at: now }],
               status: 'open',
               createdAt: now,
@@ -243,24 +261,20 @@ export function registerConsultations(app: ServiceApp, getDeps: () => Promise<Ch
         const currentCrisis = await readActiveCrisis(deps, child.gradeBand, base);
         if (currentCrisis && currentCrisis.crisisId !== crisisRef.id)
           return c.json({ notificationQueued: false, crisis: currentCrisis } satisfies ChoiceRes);
-        await deps.publish('crisis.detected', {
-          childId,
-          crisisId: crisisRef.id,
-          familyHarmSuspected: check.familyHarmSuspected,
-        });
+        const routing = routingOfCheck(check);
+        await deps.publish('crisis.detected', { childId, crisisId: crisisRef.id, ...routing });
         log.warn('crisis.detected', {
           pseudoId: childId,
           crisisId: crisisRef.id,
-          category: check.category,
-          familyHarmSuspected: check.familyHarmSuspected,
+          ...routing,
           source: 'consultation_summary',
         });
         const body: ChoiceRes = {
-          notificationQueued: !check.familyHarmSuspected,
+          notificationQueued: !routing.familyHarmSuspected,
           crisis: {
             crisisId: crisisRef.id,
             ...crisisResponse({
-              familyHarmSuspected: check.familyHarmSuspected,
+              familyHarmSuspected: routing.familyHarmSuspected,
               gradeBand: child.gradeBand,
               copy: deps.safeModeCopy,
               hotlines: deps.hotlines,
@@ -318,7 +332,11 @@ export function registerConsultations(app: ServiceApp, getDeps: () => Promise<Ch
           });
         }
       }
-      if ((req.choice === 'not_now' && level === 'l2') || req.choice === 'self') {
+      if (
+        (req.choice === 'not_now' && level === 'l2') ||
+        req.choice === 'self' ||
+        req.choice === 'proxy'
+      ) {
         update['followUpAt'] = new Date(now.getTime() + consultConfig.l2FollowUpDays * 86_400_000);
       }
       tx.update(ref, update);

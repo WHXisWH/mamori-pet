@@ -11,10 +11,11 @@ import {
 } from '@ijime/agent-core';
 import { EnvelopeCipher, LocalKeyWrapper, LocalPseudonymizer } from '@ijime/crypto';
 import { FsKbSource, Kb } from '@ijime/kb-loader';
-import { limits } from '@ijime/config';
+import { limits, rateLimit } from '@ijime/config';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from './app.js';
+import { shardCaps } from './pairing-limiter.js';
 import type { AccountDeps } from './routes/accounts.js';
 import type { ChatDeps } from './chat.js';
 
@@ -413,11 +414,16 @@ describe('account and one-use pairing workflow', () => {
   });
 
   it('bounds anonymous pairing attempts across requests before contacting the issuer', async () => {
-    await db
-      .doc('pairingAttempts/public')
-      .set({ count: 60, expiresAt: new Date(time.getTime() + 60000) });
+    const window = Math.floor(time.getTime() / 60_000);
+    const caps = shardCaps({
+      perMinute: rateLimit.childRequestsPerMinute,
+      shards: rateLimit.pairingShards,
+    });
+    await Promise.all(
+      caps.map((count, i) => db.doc(`pairingAttempts/public-${i}`).set({ window, count })),
+    );
     expect((await request('/v1/child/pair', 'POST', { code: '000000' }, null)).status).toBe(429);
     expect(issueChildToken).not.toHaveBeenCalled();
-    await db.doc('pairingAttempts/public').delete();
+    await Promise.all(caps.map((_, i) => db.doc(`pairingAttempts/public-${i}`).delete()));
   });
 });

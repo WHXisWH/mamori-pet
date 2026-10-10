@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import type { VoiceTicketRes } from '@ijime/api-types';
-import { childPath } from '@ijime/agent-core';
+import { childPath, remainingVoiceSeconds, voiceDisabled } from '@ijime/agent-core';
 import { voice as voiceConfig } from '@ijime/config';
 import {
   ApiHttpError,
@@ -14,6 +14,11 @@ import type { Hono } from 'hono';
 
 import { childAuth, type AuthEnv } from '../auth.js';
 import type { ChatDeps } from '../chat.js';
+
+const VOICE_OFF =
+  'いまは こえで はなせないよ。もじで はなしてね。困ったときの連絡先はいつでも開けるよ。';
+const VOICE_LIMIT =
+  'きょうの こえの おはなしは ここまで。もじなら つづけて はなせるよ。困ったときの連絡先はいつでも開けるよ。';
 
 // 音声チケット：60 秒有効、1回限り、子どもに紐づく。voice-relay がトランザクションで消費する
 export function registerVoice(
@@ -37,8 +42,11 @@ export function registerVoice(
         'DATA_SOURCE_DISABLED',
         'こえで はなす せっていが オフに なっています',
       );
+    if (await voiceDisabled(deps.db)) throw new ApiHttpError('MODEL_UNAVAILABLE', VOICE_OFF);
 
     const issuedAt = now();
+    if ((await remainingVoiceSeconds(deps.db, child, issuedAt)) <= 0)
+      throw new ApiHttpError('RATE_LIMITED', VOICE_LIMIT);
     const ticket = randomBytes(32).toString('base64url');
     const expiresAt = new Date(issuedAt.getTime() + voiceConfig.ticketTtlSeconds * 1000);
     await deps.db.collection(VOICE_TICKETS).doc(tokenDigest(ticket)).set({
