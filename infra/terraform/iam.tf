@@ -93,6 +93,7 @@ locals {
       "roles/cloudtrace.agent",
       "roles/monitoring.metricWriter",
     ]
+    # 保護者向けの危機 webpush は notifier が送る（docs/04-backend-api.md「危機対応経路とエラーコード」手順4）ため FCM の送信権限が要る
     notifier = [
       "roles/datastore.user",
       "roles/cloudtasks.enqueuer",
@@ -101,6 +102,7 @@ locals {
       "roles/logging.logWriter",
       "roles/cloudtrace.agent",
       "roles/monitoring.metricWriter",
+      "roles/firebasecloudmessaging.admin",
     ]
     calendar-sync = [
       "roles/datastore.user",

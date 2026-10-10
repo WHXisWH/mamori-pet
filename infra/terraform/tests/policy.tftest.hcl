@@ -249,6 +249,12 @@ run "queues_for_recheck_and_proactive_turns" {
 run "budget_off_without_billing_account" {
   command = plan
 
+  # ローカルの terraform.tfvars で東京のログバケットが有効でも断言が揺れないよう、ここで明示的に無効にする
+  variables {
+    billing_account_id       = ""
+    log_bucket_tokyo_enabled = false
+  }
+
   assert {
     condition     = length(google_billing_budget.monthly) == 0
     error_message = "請求先アカウントがないときは予算を作らない。"

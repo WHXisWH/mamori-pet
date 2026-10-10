@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import type { Firestore } from '@google-cloud/firestore';
 import type { ProactiveDispatchRes } from '@ijime/api-types';
 import {
@@ -22,6 +24,14 @@ export type ProactiveRoutesDeps = {
   now?: () => Date;
 };
 
+// 定数時間で比較する。長さが違っても早期に返さない
+function tokenMatches(given: string | undefined, expected: string): boolean {
+  if (!given) return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 function localDate(now: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(now);
 }
@@ -35,7 +45,7 @@ export function registerProactive(
   r.post('/internal/proactive-turns/dispatch', async (c) => {
     const deps = await getDeps();
     const expectedToken = deps.dispatchToken ?? process.env['PROACTIVE_DISPATCH_TOKEN'];
-    if (!expectedToken || c.req.header('X-Internal-Token') !== expectedToken)
+    if (!expectedToken || !tokenMatches(c.req.header('X-Internal-Token'), expectedToken))
       throw new ApiHttpError('UNAUTHENTICATED', 'internal token required');
     const parsed = dispatchSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new ApiHttpError('INVALID_ARGUMENT', 'invalid proactive slot');
