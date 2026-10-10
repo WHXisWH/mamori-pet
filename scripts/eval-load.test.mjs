@@ -95,6 +95,14 @@ test('records with missing, unknown or inconsistent fields are rejected with a l
     { ...crisisRecord, extra: 1 },
     { ...crisisRecord, expected_hit: true },
     { ...crisisRecord, expected_family_harm: true },
+    { ...crisisRecord, expected_hit: true, expected_category: 'suicidal' },
+    {
+      ...crisisRecord,
+      expected_hit: true,
+      expected_category: 'violence',
+      expected_family_harm: true,
+    },
+    { ...crisisRecord, expected_hit: true, expected_category: 'family_harm' },
   ];
   for (const record of bad) {
     assert.throws(

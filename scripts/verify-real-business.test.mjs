@@ -90,8 +90,17 @@ test('CLI accepts bounded selections and rejects ambiguous or unknown options', 
   assert.deepEqual(parseArgs(['--run']).cases, DEFAULT_CASES);
   assert.equal(
     DEFAULT_CASES.reduce((n, id) => n + CASES[id].calls, 0),
-    30,
+    21,
   );
+  assert.equal(LIMITS.calls, 30);
+  assert.equal(CASES.memory.calls, 18);
+  assert.equal(CASES.extensions.calls, 10);
+  assert.ok(!DEFAULT_CASES.includes('memory'));
+  assert.ok(!DEFAULT_CASES.includes('extensions'));
+  assert.deepEqual(parseArgs(['--run', '--case', 'memory,extensions']).cases, [
+    'memory',
+    'extensions',
+  ]);
   assert.equal(CASES.help.calls, 5);
   assert.equal(CASES.pipeline.calls, 7);
   assert.deepEqual(parseArgs(['--run', '--case', 'safety']).cases, ['safety']);
@@ -628,7 +637,7 @@ test('whitelisted report strips credentials, transcripts, unknown tool names and
     error: { stack: SECRET },
     toolsSelected: ['remember', SECRET],
     toolsCompleted: [SECRET],
-    crisisReasonsSelected: ['violence', SECRET, { reason: 'suicidal', text: SECRET }],
+    crisisReasonsSelected: ['violence', SECRET, { category: 'self_harm', text: SECRET }],
     modelCalls: SECRET,
     apiTimings: [{ headersMs: 200, firstDeltaMs: SECRET, completedMs: 400, text: SECRET }],
     petTimings: [{ latencyMs: 120, firstModelEventMs: 30, firstVisibleTextMs: 70, token: SECRET }],
@@ -656,13 +665,14 @@ test('model escalation evidence retains only exact reason enums from actual func
           {
             functionCall: {
               name: 'escalate_crisis',
-              args: { reason: 'violence', evidence: SECRET },
+              args: { category: 'violence', evidence: SECRET },
             },
           },
-          { functionCall: { name: 'escalate_crisis', args: { reason: 'violence' } } },
-          { functionCall: { name: 'escalate_crisis', args: { reason: SECRET } } },
-          { functionCall: { name: 'search_skill', args: { reason: 'suicidal', query: SECRET } } },
-          { functionResponse: { name: 'escalate_crisis', response: { reason: 'self_harm' } } },
+          { functionCall: { name: 'escalate_crisis', args: { category: 'violence' } } },
+          { functionCall: { name: 'escalate_crisis', args: { category: SECRET } } },
+          { functionCall: { name: 'escalate_crisis', args: { reason: 'extortion' } } },
+          { functionCall: { name: 'search_skill', args: { category: 'other', query: SECRET } } },
+          { functionResponse: { name: 'escalate_crisis', response: { category: 'self_harm' } } },
           { text: SECRET },
         ],
       },
@@ -671,12 +681,12 @@ test('model escalation evidence retains only exact reason enums from actual func
   );
   for (const value of [undefined, {}, { content: { parts: SECRET } }])
     assert.deepEqual(selectedCrisisReasons(value), []);
-  const reasons = ['self_harm', 'suicidal', 'violence', 'extortion'];
+  const reasons = ['self_harm', 'violence', 'extortion', 'family_harm', 'other'];
   assert.deepEqual(
     selectedCrisisReasons({
       content: {
         parts: reasons.map((reason) => ({
-          functionCall: { name: 'escalate_crisis', args: { reason } },
+          functionCall: { name: 'escalate_crisis', args: { category: reason } },
         })),
       },
     }),
@@ -750,19 +760,125 @@ test('blocked runs never spawn and redact unstructured preflight errors', async 
   assert.ok(!JSON.stringify(bad).includes(SECRET));
 });
 
-test('global reservation never exceeds 30 even when workers return no usage; safety is separately selected', async () => {
-  let reserved = 0;
-  const selected = [...DEFAULT_CASES, 'safety'];
+test('oversubscribed selections are blocked before any worker or preflight even in check mode', async () => {
+  for (const mode of ['--run', '--check']) {
+    const result = await runVerification([mode, '--case', 'memory,extensions,ordinary'], env(), {
+      preflight: () => assert.fail('must reject before preflight'),
+      runCase: () => assert.fail('must not partially spend'),
+    });
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.report.code, 'call_budget');
+    assert.equal(result.report.modelCalls, 0);
+    assert.equal(result.report.transportCalls, 0);
+  }
+});
+
+test('global reservation records full 28-call ceiling even when workers return no usage', async () => {
+  const reservations = [];
+  const selected = ['memory', 'extensions'];
   const result = await runVerification(['--run', '--case', selected.join(',')], env(), {
     preflight: () => ({ adcPath: '/tmp/synthetic-adc.json' }),
     runCase: async (id) => {
-      reserved += CASES[id].calls;
+      reservations.push(CASES[id].calls);
       return { status: 'fail', code: 'worker_failed', transcript: SECRET };
     },
   });
-  assert.equal(reserved, 30);
-  assert.equal(result.report.cases.at(-1).code, 'call_budget');
+  assert.deepEqual(reservations, [18, 10]);
+  assert.equal(result.report.plannedCalls, 28);
+  assert.equal(result.report.reservedCalls, 28);
+  assert.equal(result.report.limits.calls, 30);
+  assert.deepEqual(
+    result.report.cases.map((row) => row.maxCalls),
+    [18, 10],
+  );
   assert.ok(!JSON.stringify(result).includes(SECRET));
+});
+
+test('extensions require an explicit judge model and preserve it only through the sanitized env', () => {
+  const options = parseArgs(['--run', '--case', 'extensions']);
+  assert.throws(() => preflight(options, env(), io()), code('model_required'));
+  const configured = { ...env(), GEMINI_MODEL_EVAL_JUDGE: 'gemini-2.5-pro' };
+  assert.doesNotThrow(() => preflight(options, configured, io()));
+  assert.throws(
+    () => preflight(options, { ...configured, GEMINI_MODEL_EVAL_JUDGE: 'gemini-latest' }, io()),
+    code('model_required'),
+  );
+  assert.equal(
+    workerEnv(
+      { ...configured, GOOGLE_API_KEY: SECRET },
+      configured.GOOGLE_APPLICATION_CREDENTIALS,
+      PROJECT_ID,
+    ).GEMINI_MODEL_EVAL_JUDGE,
+    'gemini-2.5-pro',
+  );
+  assert.ok(
+    !JSON.stringify(
+      workerEnv(configured, configured.GOOGLE_APPLICATION_CREDENTIALS, PROJECT_ID),
+    ).includes(SECRET),
+  );
+});
+
+test('extensions reports expose only allowlisted booleans and fail without each probe', () => {
+  const row = sanitizeCase('extensions', {
+    status: 'pass',
+    code: 'verified',
+    modelCalls: 5,
+    transportCalls: 5,
+    assertions: { names_redacted: true, [SECRET]: true },
+    summary: SECRET,
+    names: [SECRET],
+    greeting: SECRET,
+    judge: { rationale: SECRET },
+  });
+  assert.equal(row.status, 'fail');
+  assert.equal(row.code, 'incomplete_result');
+  assert.ok(!JSON.stringify(row).includes(SECRET));
+  assert.deepEqual(row.assertions, { names_redacted: true });
+});
+
+test('memory cannot pass without every consent, cross-session recall and revocation assertion', () => {
+  const assertions = Object.fromEntries(
+    [
+      'verified_detector',
+      'nonfallback_reply',
+      'model_selected_remember',
+      'pending_encrypted',
+      'pending_excluded',
+      'consent_saved',
+      'memory_encrypted',
+      'later_prompt_recall',
+      'later_reply_recall',
+      'revoked_in_api',
+      'revoked_in_executor',
+      'revoked_from_model_context',
+      'revoked_from_reply',
+      'cannot_reaccept',
+    ].map((name) => [name, true]),
+  );
+  const completed = {
+    status: 'pass',
+    code: 'verified',
+    assertions,
+    modelCalls: 11,
+    transportCalls: 11,
+    prompts: [SECRET],
+    decryptedMemory: SECRET,
+  };
+  assert.equal(sanitizeCase('memory', completed).exitCode, 0);
+  assert.ok(!JSON.stringify(sanitizeCase('memory', completed)).includes(SECRET));
+  for (const name of Object.keys(assertions)) {
+    const incomplete = { ...assertions };
+    delete incomplete[name];
+    assert.equal(
+      sanitizeCase('memory', { ...completed, assertions: incomplete }).code,
+      'incomplete_result',
+    );
+  }
+  assert.equal(
+    sanitizeCase('memory', { ...completed, status: 'fail', code: 'call_budget', modelCalls: 18 })
+      .exitCode,
+    1,
+  );
 });
 
 test('supervisor hard-kills a stuck child and preserves completed assertion progress', async () => {

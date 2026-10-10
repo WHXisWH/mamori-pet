@@ -9,7 +9,7 @@ resource "google_cloud_run_v2_service" "svc" {
 
   template {
     service_account                  = google_service_account.svc[each.key].email
-    max_instance_request_concurrency = 80
+    max_instance_request_concurrency = local.capacity[each.key].concurrency
     timeout                          = each.key == "voice-relay" ? "3600s" : "300s"
 
     dynamic "vpc_access" {
@@ -24,8 +24,8 @@ resource "google_cloud_run_v2_service" "svc" {
     }
 
     scaling {
-      min_instance_count = 0
-      max_instance_count = var.environment == "prod" ? 20 : 3
+      min_instance_count = local.capacity[each.key].min_instances
+      max_instance_count = local.capacity[each.key].max_instances
     }
 
     containers {
@@ -135,7 +135,7 @@ resource "google_cloud_run_v2_job" "jobs" {
   deletion_protection = false
 
   template {
-    task_count = 1
+    task_count = each.value.task_count
 
     template {
       service_account = google_service_account.svc[each.value.service].email

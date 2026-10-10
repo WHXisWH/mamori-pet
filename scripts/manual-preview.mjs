@@ -197,14 +197,21 @@ export function assertWorkerEnvironment(env, platform = process.platform) {
 }
 
 // Wrap only accounting/cancellation. createGemini and the service keep their per-call budgets.
-export function countModelCalls(model, counter, signal) {
+export function countModelCalls(model, counter, signal, inheritScope) {
   if (model.generateContentAsync) {
     const generate = model.generateContentAsync.bind(model);
     model.generateContentAsync = async function* (request, stream, upstream) {
       const combined = AbortSignal.any([signal, upstream].filter(Boolean));
       combined.throwIfAborted();
-      counter.modelCalls++;
-      yield* generate(request, stream, combined);
+      const release = inheritScope?.(model, upstream, combined, () => {
+        counter.modelCalls++;
+      });
+      try {
+        if (!release) counter.modelCalls++;
+        yield* generate(request, stream, combined);
+      } finally {
+        release?.();
+      }
     };
   }
   if (model.connect) {
@@ -216,6 +223,22 @@ export function countModelCalls(model, counter, signal) {
     };
   }
   return model;
+}
+
+export function logSafetyModelEvent(logger, { layer, kind, reason }) {
+  if (
+    !['screen', 'review'].includes(layer) ||
+    !['quota', 'timeout', 'error', 'retry', 'breaker_open', 'breaker_skip'].includes(kind)
+  )
+    return;
+  const knownReason = [
+    'model_error',
+    'invalid_json',
+    'schema',
+    'inconsistent_verdict',
+    'invalid_evidence',
+  ].includes(reason);
+  logger.warn('crisis.model', { layer, kind, ...(knownReason ? { reason } : {}) });
 }
 
 // Each route has its own retry count, so one failed subscriber never replays successful ones.
@@ -256,7 +279,8 @@ export function createLocalQueue({
       const route = taskRoutes[spec.queue];
       demand(route && spec.url === `${taskOrigin}${route[1]}`, 'task_invalid');
       const delay = spec.delaySeconds ?? 0;
-      demand(Number.isFinite(delay) && delay >= 0 && delay <= 86400, 'task_invalid');
+      // Include the 48-hour consultation timeout while keeping local scheduling bounded.
+      demand(Number.isFinite(delay) && delay >= 0 && delay <= 7 * 86400, 'task_invalid');
       const key = spec.taskId ? `${spec.queue}/${spec.taskId}` : null;
       if (key && taskIds.has(key)) return;
       add([
@@ -364,6 +388,7 @@ export async function createManualRuntime(
   demand(load !== loadRuntimeModules || env === process.env, 'configuration_changed');
   const config = configuration(env);
   const m = await load(config);
+  demand(typeof m.core.inheritModelRequestScope === 'function', 'agent_core_scope_build_required');
   m.core.disableAdkContentCapture();
   const controller = new AbortController(),
     counter = { modelCalls: 0 };
@@ -379,6 +404,7 @@ export async function createManualRuntime(
     const wrapper = new m.crypto.LocalKeyWrapper(randomBytes(32));
     const directory = new m.core.LocalChildDirectory(db, wrapper);
     const logger = new m.kit.Logger('manual-preview', () => {});
+    const safetyLogger = new m.kit.Logger('manual-safety');
     const shared = { db, kb, directory, logger };
     const model = (purpose) =>
       countModelCalls(
@@ -388,6 +414,7 @@ export async function createManualRuntime(
         }),
         counter,
         controller.signal,
+        m.core.inheritModelRequestScope,
       );
     const detector = m.safety.createModelDetector(
       {
@@ -396,6 +423,7 @@ export async function createManualRuntime(
         reviewModel: model('crisisReview'),
       },
       m.safety.KeywordMatcher.fromLexicon(await kb.yaml('lexicon/ja.yaml', m.loader.lexiconSchema)),
+      { onModelEvent: (event) => logSafetyModelEvent(safetyLogger, event) },
     );
     const origins = [config.ports.child, config.ports.guardian].flatMap((port) => [
       `http://localhost:${port}`,
@@ -420,6 +448,7 @@ export async function createManualRuntime(
       ...shared,
       detector,
       publish,
+      requestRecheck: m.kit.crisisRecheckRequester(tasks, taskOrigin),
       sessions: new m.core.FirestoreSessionService(db, directory),
       petAgent: new m.client.HttpPetAgentClient(petUrl),
       images: new m.images.MemoryArtworkImages(),
@@ -437,6 +466,7 @@ export async function createManualRuntime(
     });
     const srt = await m.signalRuntime.createRuntime({
       ...shared,
+      detector,
       sessions: api.chat.sessions,
       publisher: { publish },
       model: model('signalExtract'),
@@ -481,6 +511,7 @@ export async function createManualRuntime(
         'data.deletion_requested': [],
       },
       taskRoutes: {
+        'crisis-recheck': [signalApp, m.kit.CRISIS_RECHECK_PATH],
         'notify-send': [notifierApp, '/internal/tasks/send'],
         'crisis-escalation': [notifierApp, '/internal/tasks/crisis-escalation'],
         'consultation-timeout': [notifierApp, '/internal/tasks/consultation-timeout'],
@@ -498,7 +529,7 @@ export async function createManualRuntime(
       const createVoiceModel = vrt.createModel;
       vrt.createModel = (...args) => {
         const value = createVoiceModel(...args);
-        countModelCalls(value.model, counter, controller.signal);
+        countModelCalls(value.model, counter, controller.signal, m.core.inheritModelRequestScope);
         return value;
       };
       backend = m.backend.createVoiceBackend(vrt);
@@ -510,6 +541,7 @@ export async function createManualRuntime(
       chat: async () => api.chat,
       submissions: async () => api.submissions,
       guardian: async () => api.guardian,
+      guardianDeletion: async () => api.guardianDeletion,
       accounts: async () => api.accounts,
       voiceWsUrl: `ws://127.0.0.1:${config.ports.voice}/v1/voice`,
     });

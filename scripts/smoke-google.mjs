@@ -512,8 +512,7 @@ async function structuredProbe(id, core, model, kb, loader, signal) {
   if (id === 'crisis-review')
     demand(
       value.hit === true &&
-        value.category === 'violence' &&
-        value.familyHarmSuspected === true &&
+        value.category === 'family_harm' &&
         value.evidenceSpan?.length > 0 &&
         danger.includes(value.evidenceSpan),
       'expectation_failed',

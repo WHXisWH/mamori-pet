@@ -28,5 +28,6 @@ playwright-report/
 /artifacts/e2e-*/
 /artifacts/real-agent-*/
 apps/child-web/src/generated/
+apps/child-web/public/readings/
 
 /artifacts/

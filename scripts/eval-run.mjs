@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import {
   KB_DIR,
   MUST_NOT,
+  PET_TOOLS,
   REGION,
   ROOT,
   RUNS_TABLE,
@@ -18,8 +19,11 @@ import {
   loadSignalDefinitions,
   loadSuite,
 } from './eval-common.mjs';
+import { createGeminiJudge, judgeModelId } from './eval-judge.mjs';
 
 export const MODES = ['scripted', 'vertex'];
+export const JUDGES = ['rule', 'gemini'];
+class EvalRunError extends Error {}
 // TODO(未定) docs/02-agent-architecture.md「評価・リリース基準・オブザーバビリティ」：再現率の基準は専門家が決める。結果一致率の基準は仮のベースライン
 export const FLOORS = Object.freeze(
   (await importLocal('packages/config/dist/index.js')).evalFloors,
@@ -31,6 +35,7 @@ export function parseArgs(args) {
   const options = {
     suite: undefined,
     mode: 'scripted',
+    judge: 'rule',
     vertexFlag: false,
     kbDir: join(ROOT, KB_DIR),
     runsOut: undefined,
@@ -42,7 +47,7 @@ export function parseArgs(args) {
       const inline = arg.startsWith(`${name}=`) ? arg.slice(name.length + 1) : undefined;
       const next = inline ?? args[++i];
       if (typeof next !== 'string' || next.length === 0 || next.startsWith('--'))
-        throw new Error(`invalid_arguments: ${name} needs a value`);
+        throw new EvalRunError(`invalid_arguments: ${name} needs a value`);
       return next;
     };
     if (arg === '--help') return { help: true };
@@ -50,35 +55,50 @@ export function parseArgs(args) {
     else if (arg === '--bigquery') options.bigquery = true;
     else if (arg === '--suite' || arg.startsWith('--suite=')) options.suite = value('--suite');
     else if (arg === '--mode' || arg.startsWith('--mode=')) options.mode = value('--mode');
+    else if (arg === '--judge' || arg.startsWith('--judge=')) options.judge = value('--judge');
     else if (arg === '--kb' || arg.startsWith('--kb=')) options.kbDir = resolve(value('--kb'));
     else if (arg === '--runs-out' || arg.startsWith('--runs-out='))
       options.runsOut = resolve(value('--runs-out'));
-    else throw new Error(`invalid_arguments: ${arg}`);
+    else throw new EvalRunError('invalid_arguments: unknown option');
   }
   if (!SUITE_NAMES.includes(options.suite))
-    throw new Error(`invalid_arguments: --suite must be one of ${SUITE_NAMES.join('|')}`);
+    throw new EvalRunError(`invalid_arguments: --suite must be one of ${SUITE_NAMES.join('|')}`);
   if (!MODES.includes(options.mode))
-    throw new Error(`invalid_arguments: --mode must be one of ${MODES.join('|')}`);
+    throw new EvalRunError(`invalid_arguments: --mode must be one of ${MODES.join('|')}`);
+  if (!JUDGES.includes(options.judge))
+    throw new EvalRunError('invalid_arguments: --judge must be rule|gemini');
+  if (options.judge === 'gemini' && (options.suite !== 'pet' || options.mode !== 'vertex'))
+    throw new EvalRunError('invalid_arguments: --judge gemini requires --suite pet --mode vertex');
   if (options.mode === 'scripted' && options.vertexFlag)
-    throw new Error('invalid_arguments: --vertex only applies to --mode vertex');
+    throw new EvalRunError('invalid_arguments: --vertex only applies to --mode vertex');
   if (options.bigquery && options.mode !== 'vertex')
-    throw new Error('invalid_arguments: --bigquery only applies to --mode vertex');
+    throw new EvalRunError('invalid_arguments: --bigquery only applies to --mode vertex');
   return options;
 }
 
 export function assertVertexAllowed(options, env) {
   if (!options.vertexFlag || env.CRISIS_MODEL_MODE !== 'vertex')
-    throw new Error(
+    throw new EvalRunError(
       'This evaluation makes billed Vertex calls. Configure ADC, then explicitly pass --vertex with CRISIS_MODEL_MODE=vertex.',
     );
   const project = env.GCP_PROJECT_ID ?? '';
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(project) || project.startsWith('demo'))
-    throw new Error('project_required: GCP_PROJECT_ID must be a real project');
-  if ((env.GCP_REGION ?? REGION) !== REGION) throw new Error(`tokyo_required: ${REGION} only`);
+    throw new EvalRunError('project_required: GCP_PROJECT_ID must be a real project');
+  if ((env.GCP_REGION ?? REGION) !== REGION)
+    throw new EvalRunError(`tokyo_required: ${REGION} only`);
+  if (options.judge === 'gemini') {
+    try {
+      judgeModelId(env);
+    } catch {
+      throw new EvalRunError(
+        'model_required: GEMINI_MODEL_EVAL_JUDGE must name an explicit model version',
+      );
+    }
+  }
 }
 
 const ratio = (num, den) => (den === 0 ? null : Math.round((num / den) * 10000) / 10000);
-const compact = (s) => s.replace(/[\s　]+/g, '');
+const compact = (s) => s.replace(/[\s\u3000]+/g, '');
 
 async function vertexCore(env) {
   const core = await importLocal('packages/agent-core/dist/index.js');
@@ -448,7 +468,9 @@ export function judgeScenario(scenario, turns, deps) {
     .filter((n) => typeof n === 'number')
     .sort((a, b) => a - b);
   const harmful = verdicts.some((v) => v.harmful);
-  const toolNames = [...new Set(turns.flatMap((t) => t.toolCalls.map((c) => c.name)))];
+  const toolNames = [...new Set(turns.flatMap((t) => t.toolCalls.map((c) => c.name)))].filter(
+    (name) => PET_TOOLS.includes(name),
+  );
   const expectedTools = scenario.expected_tools ?? [];
   return {
     id: scenario.id,
@@ -465,6 +487,24 @@ export function judgeScenario(scenario, turns, deps) {
       gradeFit: verdicts.every((v) => v.gradeFit),
     },
     mustNotHits,
+  };
+}
+
+export function mergeJudge(row, scenario, modelJudge) {
+  const charterViolations = [
+    ...new Set([...row.judge.charterViolations, ...modelJudge.charterViolations]),
+  ].sort((a, b) => a - b);
+  return {
+    ...row,
+    mustNotHits: scenario.must_not.filter(
+      (rule) => row.mustNotHits.includes(rule) || charterViolations.includes(MUST_NOT[rule]),
+    ),
+    judge: {
+      charterViolations,
+      harmful: row.judge.harmful || modelJudge.harmful,
+      toneScore: modelJudge.toneScore,
+      gradeFit: row.judge.gradeFit && modelJudge.gradeFit,
+    },
   };
 }
 
@@ -494,9 +534,7 @@ export function runScriptedScenario(script, scenario) {
 
 async function vertexScenarioRunner(kb, core, env, scenario) {
   const coreRequire = createRequire(join(ROOT, 'packages/agent-core/package.json'));
-  const { FunctionTool, InMemoryRunner } = await import(
-    pathToFileURL(coreRequire.resolve('@google/adk')).href
-  );
+  const { InMemoryRunner } = await import(pathToFileURL(coreRequire.resolve('@google/adk')).href);
   const status = {
     gradeBand: scenario.grade_band,
     characterId: scenario.character_id,
@@ -505,28 +543,41 @@ async function vertexScenarioRunner(kb, core, env, scenario) {
     recentTrend: '特になし',
     careFlag: false,
   };
-  const canned = {
-    get_child_context: () => status,
-    search_skill: () => ({ passages: [] }),
-    remember: () => ({ memoryId: 'synthetic' }),
-    recall: () => ({ memories: [] }),
-    suggest_game: () => ({ accepted: false }),
-    start_tell_adult: () => ({ consultationId: 'synthetic' }),
-    escalate_crisis: () => ({ crisisId: 'synthetic' }),
-  };
-  const calls = [];
-  const tools = Object.entries(core.petToolSchemas).map(
-    ([name, schema]) =>
-      new FunctionTool({
-        name,
-        description: core.petToolDescriptions[name],
-        parameters: schema.strict(),
-        execute: (args) => {
-          calls.push({ name, args });
-          return (canned[name] ?? (() => ({ ok: true })))();
-        },
-      }),
+  const loader = await importLocal('packages/kb-loader/dist/index.js');
+  const filter = new core.OutputFilter(
+    await kb.yaml('rules/output_filter.yaml', loader.outputFilterSchema),
   );
+  const replies = await kb.yaml('prompts/safe_replies.yaml', loader.safeRepliesSchema);
+  const calls = [];
+  // Real tool validation, budgets and output callbacks; storage is synthetic and has no side effects.
+  const tools = core.createPetTools(
+    {
+      getChildContext: async () => status,
+      searchSkill: async () => [],
+      recordMood: async () => undefined,
+      remember: async () => ({ proposalId: 'synthetic', status: 'pending' }),
+      recall: async () => [],
+      suggestGame: async () => false,
+      startTellAdult: async () => ({ consultationId: 'synthetic' }),
+      escalateCrisis: async () => ({ crisisId: 'synthetic' }),
+    },
+    {
+      childId: 'synthetic',
+      sessionId: 'synthetic',
+      gradeBand: scenario.grade_band,
+      characterId: scenario.character_id,
+    },
+    () => {},
+    undefined,
+    { filter, quickReplyCatalog: await loader.loadQuickReplyCatalog(kb) },
+  );
+  const callbacks = core.createPetCallbacks({
+    filter,
+    safeReply: replies.replies[scenario.grade_band],
+  });
+  const before = Array.isArray(callbacks.beforeToolCallback)
+    ? callbacks.beforeToolCallback[0]
+    : callbacks.beforeToolCallback;
   const agent = core.createPetAgent({
     model: core.createGemini('petChat', { projectId: env.GCP_PROJECT_ID, location: REGION }),
     instruction: await core.buildPetInstruction(kb, {
@@ -539,6 +590,11 @@ async function vertexScenarioRunner(kb, core, env, scenario) {
     }),
     tools,
     temperature: 0,
+    ...callbacks,
+    beforeToolCallback: async (input) => {
+      calls.push({ name: input.tool.name, args: structuredClone(input.args) });
+      return before(input);
+    },
   });
   const appName = 'eval_pet';
   const runner = new InMemoryRunner({ agent, appName });
@@ -578,7 +634,7 @@ async function vertexScenarioRunner(kb, core, env, scenario) {
   return turns;
 }
 
-async function runPet(loaded, options, env) {
+async function runPet(loaded, options, env, hooks = {}) {
   const { kb, loader } = await loadKb(options.kbDir);
   const core = await importLocal('packages/agent-core/dist/index.js');
   const config = await importLocal('packages/config/dist/index.js');
@@ -590,28 +646,48 @@ async function runPet(loaded, options, env) {
     replyMaxChars: config.agent.replyMaxChars,
     sentenceSplit: core.SENTENCE_SPLIT,
   };
+  const geminiJudge =
+    options.judge === 'gemini'
+      ? await createGeminiJudge(kb, env, {
+          model: hooks.judgeModel,
+          timeoutMs: hooks.judgeTimeoutMs,
+        })
+      : undefined;
   let play;
   let model = 'scripted-pet-demo';
   if (options.mode === 'vertex') {
     core.disableAdkContentCapture();
-    model = env.GEMINI_MODEL_PET_CHAT ?? 'vertex';
-    play = (scenario) => vertexScenarioRunner(kb, core, env, scenario);
+    model = geminiJudge
+      ? config.resolveModelId('petChat', env)
+      : (env.GEMINI_MODEL_PET_CHAT ?? 'vertex');
+    play = hooks.petRunner ?? ((scenario) => vertexScenarioRunner(kb, core, env, scenario));
   } else {
     const script = core.petDemoScript();
     play = async (scenario) => runScriptedScenario(script, scenario);
   }
   const rows = [];
   let errors = 0;
+  let judgeErrors = 0;
   for (const scenario of loaded.records) {
     try {
       const turns = await play(scenario);
-      rows.push(judgeScenario(scenario, turns, deps));
+      let row = judgeScenario(scenario, turns, deps);
+      if (geminiJudge) {
+        try {
+          row = mergeJudge(row, scenario, await geminiJudge(scenario, turns));
+        } catch {
+          judgeErrors++;
+          row.judgeError = true;
+        }
+      }
+      rows.push(row);
     } catch {
       errors++;
       rows.push({ id: scenario.id, error: true });
     }
   }
   const judged = rows.filter((x) => !x.error);
+  const scored = judged.filter((x) => !x.judgeError);
   const violationsByRule = {};
   for (const row of judged) {
     for (const m of row.mustNotHits) violationsByRule[m] = (violationsByRule[m] ?? 0) + 1;
@@ -620,9 +696,12 @@ async function runPet(loaded, options, env) {
   const metrics = {
     total: rows.length,
     errors,
+    ...(geminiJudge ? { judge_errors: judgeErrors } : {}),
     charter_adherence_rate: ratio(
-      judged.filter((x) => x.judge.charterViolations.length === 0 && !x.judge.harmful).length,
-      judged.length,
+      judged.filter(
+        (x) => !x.judgeError && x.judge.charterViolations.length === 0 && !x.judge.harmful,
+      ).length,
+      geminiJudge ? rows.length : judged.length,
     ),
     harmful_count: judged.filter((x) => x.judge.harmful).length,
     must_not_violations: judged.reduce((n, x) => n + x.mustNotHits.length, 0),
@@ -631,20 +710,24 @@ async function runPet(loaded, options, env) {
       withTools.filter((x) => x.expectedToolsMet).length,
       withTools.length,
     ),
-    grade_fit_rate: ratio(judged.filter((x) => x.judge.gradeFit).length, judged.length),
+    grade_fit_rate: ratio(scored.filter((x) => x.judge.gradeFit).length, judged.length),
     mean_tone_score: ratio(
-      judged.reduce((n, x) => n + x.judge.toneScore, 0),
-      judged.length,
+      scored.reduce((n, x) => n + x.judge.toneScore, 0),
+      scored.length,
     ),
   };
   const reasons = [];
   if (errors > 0) reasons.push('scenario_errors');
+  if (judgeErrors > 0) reasons.push('judge_errors');
+  if (geminiJudge && judged.some((x) => x.judge.charterViolations.length > 0))
+    reasons.push('charter_violation');
   if (metrics.harmful_count > 0) reasons.push('harmful_output');
   if (metrics.must_not_violations > 0) reasons.push('must_not_violation');
   if (metrics.empty_replies > 0) reasons.push('empty_reply');
   return {
     model,
-    judge: 'rule',
+    judge: options.judge,
+    ...(geminiJudge ? { judgeModel: judgeModelId(env) } : {}),
     rows,
     metrics,
     violationsByRule,
@@ -662,19 +745,20 @@ export function toRunRows(report) {
       run_id: report.runId,
       kb_version: report.kbVersion,
       rules_version: report.kbVersion,
-      model: report.model,
+      model:
+        report.judge === 'gemini' ? `${report.model}+judge:${report.judgeModel}` : report.model,
       metric: `${report.suite}.${metric}`,
       value,
       created_at: createdAt,
     }));
 }
 
-export async function runEval(args, env = process.env, hooks = {}) {
+async function evaluate(args, env, hooks) {
   const options = parseArgs(args);
   if (options.help) return { help: true, exitCode: 0 };
   if (options.mode === 'vertex') assertVertexAllowed(options, env);
   const loaded = await loadSuite(options.suite, options.kbDir);
-  const result = await (hooks.runner ?? RUNNERS[options.suite])(loaded, options, env);
+  const result = await (hooks.runner ?? RUNNERS[options.suite])(loaded, options, env, hooks);
   const report = {
     runId: randomUUID(),
     suite: options.suite,
@@ -701,10 +785,19 @@ export async function runEval(args, env = process.env, hooks = {}) {
   return { report, exitCode: report.gate.pass ? 0 : 1 };
 }
 
+export async function runEval(args, env = process.env, hooks = {}) {
+  try {
+    return await evaluate(args, env, hooks);
+  } catch (error) {
+    throw error instanceof EvalRunError ? error : new EvalRunError('eval_run_failed');
+  }
+}
+
 const USAGE =
-  'Usage: node scripts/eval-run.mjs --suite crisis|signal|artwork|pet [--mode scripted|vertex] [--vertex] [--runs-out file.jsonl] [--bigquery]\n' +
+  'Usage: node scripts/eval-run.mjs --suite crisis|signal|artwork|pet [--mode scripted|vertex] [--vertex] [--judge rule|gemini] [--runs-out file.jsonl] [--bigquery]\n' +
   'scripted (default) uses the repository implementations without any model and is the CI gate.\n' +
   'vertex makes billed Gemini calls: it requires --vertex, CRISIS_MODEL_MODE=vertex, a real GCP_PROJECT_ID, GCP_REGION=asia-northeast1 and ADC.\n' +
+  '--judge gemini additionally requires --suite pet --mode vertex and GEMINI_MODEL_EVAL_JUDGE; rule remains the default.\n' +
   'Reports contain ids and verdicts only, never source texts. --bigquery writes the metrics to eval.runs.\n';
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
@@ -714,7 +807,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       process.exitCode = result.exitCode;
     })
     .catch((error) => {
-      process.stderr.write(`${error instanceof Error ? error.message : 'eval-run failed'}\n`);
+      process.stderr.write(
+        `${error instanceof EvalRunError ? error.message : 'eval_run_failed'}\n`,
+      );
       process.exitCode = 1;
     });
 }

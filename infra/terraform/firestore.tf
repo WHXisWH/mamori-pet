@@ -44,6 +44,7 @@ locals {
     islandScenes      = "expireAt"
     pairingCodes      = "expiresAt"
     invitations       = "expiresAt"
+    invitationLookup  = "expiresAt"
     voiceTickets      = "expiresAt"
     toolUsage         = "expireAt"
     toolReceipts      = "expireAt"
@@ -53,6 +54,7 @@ locals {
     petRequests       = "expiresAt"
     pairingCodeLookup = "expiresAt"
     pairingAttempts   = "expiresAt"
+    jobRuns           = "expiresAt"
   }
 
   # コレクショングループに対する単一フィールドの等価クエリ用（既定では単一コレクション向けの単一フィールドインデックスしか作られない）
@@ -61,6 +63,11 @@ locals {
     guardians           = "guardianId"
     calendarConnections = "status"
     devices             = "fcmToken"
+  }
+  # 同じコレクションに対する 2 つ目の家庭横断クエリ用フィールド（上の表はコレクションごとに 1 フィールドしか置けず、キー名を変えると既存のインデックスが作り直される）
+  # children.status：api の自発ターン配信が status == active の子ども全員を検索する（services/api/src/routes/proactive.ts）
+  collection_group_extra_fields = {
+    "children.status" = { collection = "children", field = "status" }
   }
 }
 
@@ -191,6 +198,22 @@ resource "google_firestore_index" "context_events_child_start" {
   }
 }
 
+# 日次のリスクレベル判定とペットのコンテキストは、まだ終わっていない状況（endDate >= ウィンドウの開始）だけを取る
+resource "google_firestore_index" "context_events_child_end" {
+  database    = google_firestore_database.main.name
+  collection  = "contextEvents"
+  query_scope = "COLLECTION"
+
+  fields {
+    field_path   = "childIds"
+    array_config = "CONTAINS"
+  }
+  fields {
+    field_path = "endDate"
+    order      = "ASCENDING"
+  }
+}
+
 resource "google_firebaserules_ruleset" "firestore" {
   provider = google-beta
 
@@ -240,6 +263,59 @@ resource "google_firestore_index" "kb_chunks_vector" {
     vector_config {
       dimension = 768
       flat {}
+    }
+  }
+}
+
+resource "google_firestore_index" "memories_vector" {
+  count       = var.memory_vector_search ? 1 : 0
+  provider    = google-beta
+  database    = google_firestore_database.main.name
+  collection  = "memories"
+  query_scope = "COLLECTION"
+  api_scope   = "ANY_API"
+
+  fields {
+    field_path = "characterId"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "petId"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "embeddingModel"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "__name__"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = 768
+      flat {}
+    }
+  }
+}
+
+resource "google_firestore_field" "collection_group_extra" {
+  provider = google-beta
+  for_each = local.collection_group_extra_fields
+
+  database   = google_firestore_database.main.name
+  collection = each.value.collection
+  field      = each.value.field
+
+  index_config {
+    indexes {
+      order       = "ASCENDING"
+      query_scope = "COLLECTION"
+    }
+    indexes {
+      order       = "ASCENDING"
+      query_scope = "COLLECTION_GROUP"
     }
   }
 }

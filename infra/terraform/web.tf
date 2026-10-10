@@ -104,7 +104,12 @@ resource "google_cloud_run_v2_service" "web" {
         for_each = merge(
           local.web_common_env,
           each.value.env,
-          { NEXT_PUBLIC_FIREBASE_API_KEY = data.google_firebase_web_app_config.web[each.key].api_key },
+          {
+            NEXT_PUBLIC_FIREBASE_API_KEY             = data.google_firebase_web_app_config.web[each.key].api_key
+            NEXT_PUBLIC_FIREBASE_APP_ID              = each.value.firebase_app.app_id
+            NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID = data.google_firebase_web_app_config.web[each.key].messaging_sender_id
+          },
+          var.firebase_app_check_site_key == "" ? {} : { NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY = var.firebase_app_check_site_key },
           var.fcm_vapid_key == "" ? {} : { NEXT_PUBLIC_FIREBASE_VAPID_KEY = var.fcm_vapid_key },
         )
         content {
@@ -119,6 +124,11 @@ resource "google_cloud_run_v2_service" "web" {
 
   lifecycle {
     ignore_changes = [client, client_version]
+
+    precondition {
+      condition     = var.environment != "prod" || trimspace(var.firebase_app_check_site_key) != ""
+      error_message = "本番環境では firebase_app_check_site_key を設定する。設定がないと API は子ども側のリクエストを拒否する。"
+    }
   }
 }
 

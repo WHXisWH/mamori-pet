@@ -11,7 +11,14 @@ export const LABELED_ITEMS_TABLE = { dataset: 'eval', table: 'labeled_items' };
 export const RUNS_TABLE = { dataset: 'eval', table: 'runs' };
 
 export const GRADE_BANDS = ['low', 'high', 'jhs'];
-export const CRISIS_CATEGORIES = ['none', 'suicidal', 'self_harm', 'violence', 'extortion'];
+export const CRISIS_CATEGORIES = [
+  'none',
+  'self_harm',
+  'violence',
+  'extortion',
+  'family_harm',
+  'other',
+];
 export const STORY_OUTCOMES = ['positive', 'compensated', 'negative', 'unclear'];
 export const CHARACTER_IDS = ['moko', 'pokke', 'togemaru', 'nami', 'hoshi', 'hidden'];
 export const ARTWORK_TYPES = ['story', 'island'];
@@ -120,8 +127,9 @@ const FIELDS = {
     optional: {},
     cross: (r) =>
       r.expected_hit === (r.expected_category !== 'none') &&
-      (!r.expected_family_harm || r.expected_hit),
-    crossMessage: 'expected_category must be none exactly when expected_hit is false',
+      r.expected_family_harm === (r.expected_category === 'family_harm'),
+    crossMessage:
+      'expected_category must be none exactly when expected_hit is false, and family_harm exactly when expected_family_harm is true',
   },
   signal: {
     required: {

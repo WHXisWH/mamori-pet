@@ -1,6 +1,12 @@
 import { createRequire } from 'node:module';
 import { localPorts } from './local-ports.mjs';
 import { ScriptedLlm } from '../packages/agent-core/dist/index.js';
+import {
+  CrisisDetector,
+  KeywordMatcher,
+  KeywordConfirmReviewer,
+  ModelCallError,
+} from '../packages/crisis-detector/dist/index.js';
 import { encodePushEnvelope, Logger } from '../packages/service-kit/dist/index.js';
 import { createApp as apiApp } from '../services/api/dist/app.js';
 import { createApiRuntime } from '../services/api/dist/runtime.js';
@@ -14,7 +20,7 @@ import { createApp as notifierApp } from '../services/notifier/dist/app.js';
 import { createRuntime as notifierRuntime } from '../services/notifier/dist/runtime.js';
 import { MemoryDailyFeatures } from '../services/notifier/dist/weekly-source.js';
 import { previousWeek, runWeeklyReport } from '../services/notifier/dist/weekly.js';
-import { moodScoresSchema } from '../packages/kb-loader/dist/index.js';
+import { moodScoresSchema, lexiconSchema } from '../packages/kb-loader/dist/index.js';
 import { createApp as voiceApp } from '../services/voice-relay/dist/app.js';
 import { createVoiceBackend } from '../services/voice-relay/dist/backend.js';
 import { createVoiceRuntime } from '../services/voice-relay/dist/runtime.js';
@@ -53,6 +59,7 @@ const timers = new Set();
 const taskIds = new Set();
 const eventCounts = {};
 let notifier;
+let pet;
 let signal;
 let risk;
 let lastFailure = null;
@@ -75,7 +82,8 @@ const tasks = {
     const timer = setTimeout(
       () => {
         timers.delete(timer);
-        void post(notifier, new URL(spec.url).pathname, spec.body).catch(() =>
+        const target = new URL(spec.url).pathname === '/internal/proactive-turns' ? pet : notifier;
+        void post(target, new URL(spec.url).pathname, spec.body).catch(() =>
           logger.error('local.task_failed', { queue: spec.queue }),
         );
       },
@@ -102,8 +110,34 @@ const publish = async (topic, payload) => {
 };
 const api = await createApiRuntime({
   publish,
+  proactiveQueue: tasks,
+  proactiveDispatchToken: 'local-proactive',
   artworkFeatures: (req) => post(signal, '/internal/artworks/features', req),
 });
+// Exact synthetic inputs test routing and outages, not semantic detection accuracy.
+// This harness is guarded above against production, cloud Firestore and real models.
+const familyHarmFixture = '[local-e2e:family-harm] お父さんに殴られている';
+const keywords = KeywordMatcher.fromLexicon(await api.kb.yaml('lexicon/ja.yaml', lexiconSchema));
+const keywordReviewer = new KeywordConfirmReviewer(keywords);
+const demoDetector = new CrisisDetector(
+  keywords,
+  {
+    async screen(input) {
+      if (input.text === '[local-e2e:model-unavailable]') throw new ModelCallError('error');
+      return { suspect: input.text === familyHarmFixture };
+    },
+  },
+  {
+    async review(input) {
+      if (input.text === '[local-e2e:model-unavailable]') throw new ModelCallError('error');
+      return input.text === familyHarmFixture
+        ? { hit: true, category: 'family_harm', confidence: 1 }
+        : keywordReviewer.review(input);
+    },
+  },
+);
+api.chat.detector = demoDetector;
+api.submissions.detector = demoDetector;
 const shared = { db: api.chat.db, kb: api.kb, directory: api.chat.directory, logger };
 const child = await shared.directory.lookup('c_dev');
 const demoFamily = shared.db.doc(`families/${child.familyId}`);
@@ -232,13 +266,16 @@ for (const [day, weather] of demoWeather.entries()) {
 }
 await runWeeklyReport(nrt, { weekStart });
 const prt = await petRuntime({ ...shared, publish });
+pet = petApp(async () => prt);
 const app = apiApp({
   getKb: async () => api.kb,
   allowedOrigins: origins,
   chat: async () => api.chat,
   submissions: async () => api.submissions,
   guardian: async () => api.guardian,
+  guardianDeletion: async () => api.guardianDeletion,
   accounts: async () => api.accounts,
+  proactive: async () => api.proactive,
   ...(api.calendar ? { calendar: async () => api.calendar } : {}),
   voiceWsUrl: `ws://localhost:${ports.voice}/v1/voice`,
 });
@@ -256,10 +293,7 @@ const listen = (app, port) => {
   servers.push(server);
   return server;
 };
-listen(
-  petApp(async () => prt),
-  ports.pet,
-);
+listen(pet, ports.pet);
 listen(app, ports.api);
 const vrt = await createVoiceRuntime({ ...shared, detector: api.chat.detector, publish });
 const backend = createVoiceBackend(vrt);

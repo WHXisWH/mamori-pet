@@ -352,8 +352,7 @@ async function structuredProbe(id, ctx) {
   if (id === 'review-family')
     ensure(
       value.hit &&
-        value.category === 'violence' &&
-        value.familyHarmSuspected &&
+        value.category === 'family_harm' &&
         value.evidenceSpan?.length &&
         DANGER.includes(value.evidenceSpan),
     );

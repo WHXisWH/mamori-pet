@@ -4,14 +4,24 @@ resource "random_password" "calendar_oauth_state" {
   special = false
 }
 
+# 自発ターン配信エンドポイントの内部トークン：Cloud Scheduler のリクエストヘッダーと api が読むシークレットは同じ値。
+# 変数で指定しなければ Terraform が生成し、state ファイルと Secret Manager にだけ保存する。環境変数に平文では書かない。
+resource "random_password" "proactive_dispatch_token" {
+  length  = 48
+  special = false
+}
+
 locals {
   secret_ids = toset(concat(
-    ["calendar-oauth-state"],
+    ["calendar-oauth-state", "proactive-dispatch-token"],
     local.calendar_enabled ? ["google-oauth-client-secret"] : [],
+    local.gmail_enabled ? ["gmail-sender-credentials"] : [],
   ))
   secret_values = {
     calendar-oauth-state       = random_password.calendar_oauth_state.result
+    proactive-dispatch-token   = var.proactive_dispatch_token != "" ? var.proactive_dispatch_token : random_password.proactive_dispatch_token.result
     google-oauth-client-secret = var.google_oauth_client_secret
+    gmail-sender-credentials   = var.gmail_sender_credentials
   }
   secret_accessors = merge([
     for svc, envs in local.service_secret_env : {

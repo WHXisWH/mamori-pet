@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
+import * as preview from './manual-preview.mjs';
 import {
   PROJECT,
   ROOT,
@@ -202,14 +203,97 @@ test('accounting permits more than 30 model calls, preserves requests and only a
     controller.signal,
   );
   for (let i = 0; i < 45; i++)
-    for await (const _ of model.generateContentAsync(request, true)) {
-      /* consume */
+    for await (const chunk of model.generateContentAsync(request, true)) {
+      assert.equal(chunk.value, 'synthetic');
     }
   assert.equal(counter.modelCalls, 45);
   assert.deepEqual(request, before);
   controller.abort();
   await assert.rejects(model.generateContentAsync(request, true).next());
   assert.equal(counter.modelCalls, 45);
+});
+
+test('accounting inherits request scope, counts attempts not logical calls and cleans up on failure', async () => {
+  const counter = { modelCalls: 0 };
+  const controller = new AbortController();
+  const upstream = new AbortController();
+  const attempts = new Map();
+  let releases = 0;
+  const model = countModelCalls(
+    {
+      async *generateContentAsync(_req, _stream, signal) {
+        attempts.get(signal)?.();
+        attempts.get(signal)?.();
+        await Promise.reject(new Error('synthetic failure'));
+        yield {};
+      },
+    },
+    counter,
+    controller.signal,
+    (_model, from, to, onAttempt) => {
+      assert.equal(from, upstream.signal);
+      assert.notEqual(to, from);
+      attempts.set(to, onAttempt);
+      return () => {
+        releases++;
+        attempts.delete(to);
+      };
+    },
+  );
+  await assert.rejects(
+    model.generateContentAsync({}, true, upstream.signal).next(),
+    /synthetic failure/,
+  );
+  assert.equal(counter.modelCalls, 2);
+  assert.equal(releases, 1);
+  assert.equal(attempts.size, 0);
+  controller.abort();
+  await assert.rejects(model.generateContentAsync({}, true, upstream.signal).next());
+  assert.equal(counter.modelCalls, 2);
+  assert.equal(releases, 1);
+});
+
+test('safety diagnostics forward only enumerated layer and kind, never input or provider details', () => {
+  const entries = [];
+  const logger = { warn: (event, fields) => entries.push({ event, fields }) };
+  for (const layer of ['screen', 'review']) {
+    for (const kind of ['quota', 'timeout', 'error', 'retry', 'breaker_open', 'breaker_skip']) {
+      preview.logSafetyModelEvent(logger, { layer, kind, input: SECRET, error: new Error(SECRET) });
+    }
+  }
+  preview.logSafetyModelEvent(logger, { layer: SECRET, kind: 'error' });
+  preview.logSafetyModelEvent(logger, { layer: 'screen', kind: SECRET });
+  assert.equal(entries.length, 12);
+  assert.deepEqual(entries[1], {
+    event: 'crisis.model',
+    fields: { layer: 'screen', kind: 'timeout' },
+  });
+  assert.ok(entries.every(({ fields }) => Object.keys(fields).join(',') === 'layer,kind'));
+  assert.ok(!JSON.stringify(entries).includes(SECRET));
+});
+
+test('safety diagnostics allow only enumerated reasons, never a raw model error', () => {
+  const entries = [];
+  const logger = { warn: (event, fields) => entries.push({ event, fields }) };
+  for (const reason of [
+    'model_error',
+    'invalid_json',
+    'schema',
+    'inconsistent_verdict',
+    'invalid_evidence',
+  ]) {
+    preview.logSafetyModelEvent(logger, {
+      layer: 'review',
+      kind: 'error',
+      reason,
+      evidenceSpan: SECRET,
+      input: SECRET,
+    });
+    assert.equal(entries.at(-1).fields.reason, reason);
+  }
+  preview.logSafetyModelEvent(logger, { layer: 'review', kind: 'error', reason: SECRET });
+  assert.deepEqual(entries.at(-1).fields, { layer: 'review', kind: 'error' });
+  assert.ok(!JSON.stringify(entries).includes(SECRET));
 });
 
 test('event dispatch is asynchronous, retries are finite and successful subscribers are not replayed', async () => {
@@ -248,6 +332,127 @@ test('event dispatch is asynchronous, retries are finite and successful subscrib
     /task_invalid/,
   );
   await queue.close();
+});
+
+test('keeps the configured 48-hour no-answer task pending until its due time', async () => {
+  let now = 0,
+    delivered = 0;
+  const queue = createLocalQueue({
+    schemas: {},
+    routes: {},
+    taskRoutes: { 'consultation-timeout': ['notifier', '/timeout'] },
+    taskOrigin: 'http://127.0.0.1:8080',
+    now: () => now,
+    dispatch: async () => {
+      delivered++;
+    },
+  });
+  await queue.enqueue({
+    queue: 'consultation-timeout',
+    url: 'http://127.0.0.1:8080/timeout',
+    body: { consultationId: 'synthetic' },
+    delaySeconds: 48 * 3600,
+  });
+  now = 24 * 3600 * 1000;
+  await queue.drain();
+  assert.equal(delivered, 0);
+  now = 48 * 3600 * 1000;
+  await queue.drain();
+  assert.equal(delivered, 1);
+  await queue.close();
+});
+
+test('manual runtime wires paused inputs to the executable recheck queue and same detector', async () => {
+  let chat, worker;
+  const delivered = [];
+  const detector = { check: async () => ({ hit: false }) };
+  class Empty {}
+  class Db {
+    async terminate() {}
+  }
+  class Logger {
+    warn() {}
+  }
+  const kb = { yaml: async () => ({}) };
+  const app = { get() {} };
+  const modules = {
+    Firestore: Db,
+    core: {
+      inheritModelRequestScope() {},
+      disableAdkContentCapture() {},
+      LocalChildDirectory: Empty,
+      FirestoreSessionService: Empty,
+      createGemini: () => ({}),
+    },
+    crypto: { LocalKeyWrapper: Empty, EnvelopeCipher: Empty, LocalPseudonymizer: Empty },
+    loader: { Kb: { load: async () => kb }, FsKbSource: Empty },
+    safety: { createModelDetector: () => detector, KeywordMatcher: { fromLexicon() {} } },
+    kit: {
+      Logger,
+      eventSchemas: {},
+      CRISIS_RECHECK_PATH: '/internal/tasks/crisis-recheck',
+      crisisRecheckRequester: (queue, origin) => (task) =>
+        queue.enqueue({
+          queue: 'crisis-recheck',
+          url: `${origin}/internal/tasks/crisis-recheck`,
+          body: task,
+          delaySeconds: 0,
+          taskId: task.messageId,
+        }),
+    },
+    apiRuntime: {
+      createApiRuntime: async (options) => {
+        chat = options;
+        return { chat: options };
+      },
+    },
+    images: { MemoryArtworkImages: Empty },
+    client: { HttpPetAgentClient: Empty },
+    petRuntime: { createRuntime: async () => ({}) },
+    signalRuntime: {
+      createRuntime: async (options) => {
+        worker = options;
+        return options;
+      },
+    },
+    signal: {
+      createApp: () => ({
+        request: async (path, req) => {
+          delivered.push({ path, body: JSON.parse(req.body) });
+          return { ok: true };
+        },
+      }),
+    },
+    riskRuntime: { createRuntime: async () => ({}) },
+    risk: { createApp: () => ({}) },
+    notifierRuntime: { createRuntime: async () => ({}) },
+    notifier: { createApp: () => ({}) },
+    features: { MemoryDailyFeatures: Empty },
+    api: { createApp: () => app },
+    pet: { createApp: () => ({}) },
+  };
+  const runtime = await preview.createManualRuntime(
+    {
+      project: 'demo-manual-11111111-1111-4111-8111-111111111111',
+      env: workerEnv(env(), env().GOOGLE_APPLICATION_CREDENTIALS),
+    },
+    async () => modules,
+  );
+  try {
+    assert.equal(typeof chat.requestRecheck, 'function');
+    assert.equal(worker.detector, detector);
+    const task = { familyId: 'f', childId: 'c', sessionId: 's', messageId: 'm', channel: 'text' };
+    await chat.requestRecheck(task);
+    await chat.requestRecheck(task);
+    assert.equal(delivered.length, 0);
+    assert.equal(runtime.getStatus().pendingJobs, 1);
+    await runtime.drain();
+    assert.deepEqual(delivered, [{ path: '/internal/tasks/crisis-recheck', body: task }]);
+    assert.equal(runtime.getStatus().pendingJobs, 0);
+    assert.equal(runtime.getStatus().failedJobs, 0);
+  } finally {
+    await runtime.close();
+  }
 });
 
 test('disabled voice starts only loopback API and pet services and never attaches a voice server', async () => {

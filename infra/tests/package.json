@@ -11,6 +11,7 @@
     "clean": "rm -rf firestore-debug.log"
   },
   "devDependencies": {
+    "@ijime/config": "workspace:*",
     "@firebase/rules-unit-testing": "^5.0.2",
     "firebase": "^12.0.0",
     "firebase-tools": "^15.32.0"

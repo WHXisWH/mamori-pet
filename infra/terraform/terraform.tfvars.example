@@ -8,6 +8,7 @@ authorized_domains  = ["localhost", "mamori-child.web.app", "mamori-guardian.web
 # hosting_site_ids = { child = "mamori-child", guardian = "mamori-guardian" }
 # 保護者の Google ログインとカレンダー連携は同じ OAuth クライアントを使う。指定しなければどちらも有効にならない
 # google_oauth_client_id     = "XXXX.apps.googleusercontent.com"
+# proactive_paused = false  # ペットの自発ターン（声かけ）の 3 つの定期ジョブ（既定は一時停止）
 # google_oauth_client_secret = "TF_VAR_google_oauth_client_secret で渡し、ファイルには書かない"
 # カスタムドメイン。指定しなければ Cloud Run の既定 URL を使う
 # api_public_url = "https://api-dev.example.jp"
@@ -30,3 +31,11 @@ authorized_domains  = ["localhost", "mamori-child.web.app", "mamori-guardian.web
 # }
 # Firestore CMEK のクォータが承認されていないときは false にする（データベース作成後は変更できない）
 # firestore_cmek_enabled = false
+# 予算（請求先アカウントの通貨は JPY であること。実行用の ID にその請求先アカウントの Billing Account Costs Manager が必要）
+# billing_account_id = "XXXXXX-XXXXXX-XXXXXX"
+# 運用アラートの送信先メールアドレス（指定しなければコンソールでだけ確認できる）
+# alert_notification_emails = ["ops@example.jp"]
+# _Default のログを東京のログバケットに保存する
+# log_bucket_tokyo_enabled = true
+# 危機メール（Gmail API）：認証情報の JSON は環境変数で渡し、ファイルには書かない
+# export TF_VAR_gmail_sender_credentials='{"clientId":"…","clientSecret":"…","refreshToken":"…","sender":"…@gmail.com"}'

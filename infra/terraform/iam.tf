@@ -48,27 +48,33 @@ locals {
     api = [
       "roles/datastore.user",
       "roles/pubsub.publisher",
+      "roles/cloudtasks.enqueuer",
       "roles/aiplatform.user",
       "roles/firebaseauth.admin",
       "roles/logging.logWriter",
       "roles/cloudtrace.agent",
       "roles/monitoring.metricWriter",
+      "roles/firebaseappcheck.tokenVerifier",
     ]
     voice-relay = [
       "roles/datastore.user",
       "roles/pubsub.publisher",
+      "roles/cloudtasks.enqueuer",
       "roles/aiplatform.user",
       "roles/logging.logWriter",
       "roles/cloudtrace.agent",
       "roles/monitoring.metricWriter",
     ]
-    pet-agent = [
+    pet-agent = concat([
       "roles/datastore.user",
       "roles/aiplatform.user",
       "roles/logging.logWriter",
       "roles/cloudtrace.agent",
       "roles/monitoring.metricWriter",
-    ]
+      ],
+      var.child_push_enabled ? ["roles/firebasecloudmessaging.admin"] : [],
+      var.model_armor_template == "" ? [] : ["roles/modelarmor.user", "roles/modelarmor.viewer"],
+    )
     signal-worker = [
       "roles/datastore.user",
       "roles/pubsub.publisher",

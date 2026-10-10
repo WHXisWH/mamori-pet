@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 const root = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const tf = (name: string) => readFileSync(join(root, 'infra/terraform', name), 'utf8');
 
-function serviceSource(svc: string): string {
+function sourceUnder(dir: string): string {
   const out: string[] = [];
   const walk = (d: string) => {
     for (const name of readdirSync(d)) {
@@ -17,9 +17,10 @@ function serviceSource(svc: string): string {
       else if (/\.ts$/.test(name) && !/\.test\.ts$/.test(name)) out.push(readFileSync(p, 'utf8'));
     }
   };
-  walk(join(root, 'services', svc, 'src'));
+  walk(join(root, dir, 'src'));
   return out.join('\n');
 }
+const serviceSource = (svc: string) => sourceUnder(join('services', svc));
 
 // サブスクリプションはあるが、サービス側が未実装の push（データ削除の処理は未実装）
 const NOT_YET_IMPLEMENTED = new Set(['data.deletion_requested--api']);
@@ -44,7 +45,10 @@ describe('Terraform wiring matches service code', () => {
       'memoryProposals',
       'pairingCodeLookup',
       'pairingAttempts',
+      'invitations',
+      'invitationLookup',
       'petRequests',
+      'jobRuns',
     ]) {
       expect(tf('firestore.tf')).toMatch(new RegExp(`${collection}\\s*=\\s*"expiresAt"`));
     }
@@ -72,9 +76,14 @@ describe('Terraform wiring matches service code', () => {
     const declared = new Set(
       [...tf('tasks.tf').matchAll(/name\s*=\s*"([a-z-]+)"/g)].map((m) => m[1]),
     );
-    const used = ['notifier', 'risk-engine', 'api', 'voice-relay'].flatMap((svc) =>
-      [...serviceSource(svc).matchAll(/queue:\s*'([a-z-]+)'/g)].map((m) => m[1]!),
-    );
+    const used = [
+      'services/notifier',
+      'services/risk-engine',
+      'services/api',
+      'services/voice-relay',
+      'packages/service-kit',
+    ].flatMap((dir) => [...sourceUnder(dir).matchAll(/queue:\s*'([a-z-]+)'/g)].map((m) => m[1]!));
+    expect(used).toContain('crisis-recheck');
     expect(used.length).toBeGreaterThan(0);
     for (const q of used) expect(declared, q).toContain(q);
   });

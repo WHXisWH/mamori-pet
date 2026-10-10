@@ -170,7 +170,7 @@ run "secrets_stay_in_tokyo_and_are_scoped" {
 
   assert {
     condition     = alltrue([for k, a in local.secret_accessors : contains(["api", "calendar-sync"], a.svc)])
-    error_message = "OAuth 関連のシークレットを読めるのは api と calendar-sync だけ。"
+    error_message = "OAuth 関連のシークレットを読めるのは api と calendar-sync だけ。Gmail の認証情報がないときは notifier はシークレットを一切読まない。"
   }
 }
 
@@ -203,7 +203,146 @@ run "calendar_on_with_oauth_client" {
   }
 
   assert {
-    condition     = contains(keys(google_cloud_scheduler_job.jobs), "calendar-sync-daily") && toset(keys(local.secret_accessors)) == toset(["api|calendar-oauth-state", "api|google-oauth-client-secret", "calendar-sync|google-oauth-client-secret"])
+    condition     = contains(keys(google_cloud_scheduler_job.jobs), "calendar-sync-daily") && toset(keys(local.secret_accessors)) == toset(["api|calendar-oauth-state", "api|proactive-dispatch-token", "api|google-oauth-client-secret", "calendar-sync|google-oauth-client-secret"])
     error_message = "カレンダーを有効にしたらカレンダー同期をスケジュールし、クライアントシークレットは api と calendar-sync だけに渡す。"
+  }
+}
+
+run "capacity_per_service" {
+  command = plan
+
+  assert {
+    condition     = google_cloud_run_v2_service.svc["voice-relay"].template[0].max_instance_request_concurrency == var.voice_relay_concurrency && var.voice_relay_concurrency < var.service_concurrency
+    error_message = "voice-relay は 1 インスタンスあたり少数の音声セッションだけを受け持つ（低い同時実行数）。"
+  }
+
+  assert {
+    condition     = toset([for k, s in google_cloud_run_v2_service.svc : k if s.template[0].scaling[0].min_instance_count > 0]) == toset(["api", "notifier"])
+    error_message = "最小インスタンスを確保するのは危機対応経路（api、notifier）だけで、ほかのサービスは 0 までスケールインする。"
+  }
+
+  assert {
+    condition     = alltrue([for k in ["api", "notifier"] : google_cloud_run_v2_service.svc[k].template[0].scaling[0].min_instance_count == var.crisis_path_min_instances])
+    error_message = "危機対応経路の最小インスタンス数は crisis_path_min_instances から取る。"
+  }
+}
+
+run "queues_for_recheck_and_proactive_turns" {
+  command = plan
+
+  assert {
+    condition     = google_cloud_tasks_queue.crisis_recheck.name == "crisis-recheck" && google_cloud_tasks_queue.proactive_turns.name == "proactive-turns"
+    error_message = "再審査と自発ターンにはそれぞれ 1 つのキューがあり、名前はサービスのコードと一致させる。"
+  }
+
+  assert {
+    condition     = alltrue([for q in [google_cloud_tasks_queue.crisis_recheck, google_cloud_tasks_queue.proactive_turns] : q.rate_limits[0].max_dispatches_per_second * 60 <= 300 / 2 && q.location == "asia-northeast1"])
+    error_message = "バックグラウンドキューのディスパッチ速度は Flash のクォータ（pilot.flashRequestsPerMinute = 300 回/分）の半分以下に抑え、オンラインの会話に余裕を残す。キューは東京に置く。"
+  }
+
+  assert {
+    condition     = alltrue([for b in [google_cloud_run_v2_service_iam_member.tasks_invokes_pet_agent, google_cloud_run_v2_service_iam_member.tasks_invokes_signal_worker] : b.role == "roles/run.invoker"]) && google_cloud_run_v2_service_iam_member.tasks_invokes_pet_agent.name == "pet-agent" && google_cloud_run_v2_service_iam_member.tasks_invokes_signal_worker.name == "signal-worker"
+    error_message = "Cloud Tasks の呼び出し用サービスアカウントは pet-agent（自発ターン）と signal-worker（再審査）を呼び出せる。"
+  }
+}
+
+run "budget_off_without_billing_account" {
+  command = plan
+
+  assert {
+    condition     = length(google_billing_budget.monthly) == 0
+    error_message = "請求先アカウントがないときは予算を作らない。"
+  }
+
+  assert {
+    condition     = google_pubsub_topic.budget_alerts.message_storage_policy[0].allowed_persistence_regions == toset(["asia-northeast1"])
+    error_message = "budget-alerts トピックは常に作る（音声のサーキットブレーカーが購読する）。メッセージは東京だけに保存する。"
+  }
+
+  assert {
+    condition     = google_pubsub_subscription.budget_alerts_notifier.name == "budget-alerts--notifier" && google_pubsub_subscription.budget_alerts_notifier.expiration_policy[0].ttl == ""
+    error_message = "請求先アカウントがないときも予算通知の push サブスクリプションは作る（内部イングレスの notifier に push し、公開されている voice-relay には push しない）。期限切れにしない。"
+  }
+
+  assert {
+    condition     = length(google_logging_project_bucket_config.tokyo) == 0 && length(google_logging_project_exclusion.default_routed_to_tokyo) == 0
+    error_message = "東京のログバケットを有効にしていないときは _Default のルーティングを変えない。"
+  }
+}
+
+run "budget_and_alerts_on" {
+  command = plan
+
+  variables {
+    billing_account_id        = "000000-000000-000000"
+    alert_notification_emails = ["ops@example.jp"]
+    log_bucket_tokyo_enabled  = true
+  }
+
+  assert {
+    condition     = google_billing_budget.monthly[0].amount[0].specified_amount[0].currency_code == "JPY" && google_billing_budget.monthly[0].amount[0].specified_amount[0].units == "75000"
+    error_message = "月予算は 7.5 万円（pilot.monthlyBudgetJpy）。"
+  }
+
+  assert {
+    condition     = [for r in google_billing_budget.monthly[0].threshold_rules : r.threshold_percent] == [0.5, 0.9, 1.0]
+    error_message = "予算の 50%、90%、100% でアラートを出す（pilot.budgetAlertThresholds）。"
+  }
+
+  assert {
+    condition     = google_billing_budget.monthly[0].budget_filter[0].calendar_period == "MONTH"
+    error_message = "予算は暦月で集計する。"
+  }
+
+  assert {
+    condition     = length(google_monitoring_notification_channel.email) == 1 && google_monitoring_notification_channel.email["ops@example.jp"].labels.email_address == "ops@example.jp" && length(local.alert_channels) == 1
+    error_message = "アラートの送信先メールアドレスを設定できる。"
+  }
+
+  assert {
+    condition     = google_logging_project_bucket_config.tokyo[0].location == "asia-northeast1" && google_logging_project_sink.tokyo[0].filter == google_logging_project_exclusion.default_routed_to_tokyo[0].filter
+    error_message = "ログバケットは東京に置く。東京へ送るログと _Default から除外するログは完全に一致させ、欠落も重複も起こさない。"
+  }
+}
+
+run "gmail_sender_only_for_notifier" {
+  command = plan
+
+  variables {
+    gmail_sender_credentials = "{\"clientId\":\"c\",\"clientSecret\":\"s\",\"refreshToken\":\"r\",\"sender\":\"n@example.jp\"}"
+  }
+
+  assert {
+    condition     = [for k, a in local.secret_accessors : a.svc if a.secret == "gmail-sender-credentials"] == ["notifier"]
+    error_message = "Gmail の送信用認証情報を読めるのは sa-notifier だけ。"
+  }
+
+  assert {
+    condition     = local.service_secret_env["notifier"]["GMAIL_CREDENTIALS"] == "gmail-sender-credentials" && length(local.service_secret_env["notifier"]) == 1
+    error_message = "notifier は GMAIL_CREDENTIALS を Secret Manager から受け取る。"
+  }
+
+  assert {
+    condition     = alltrue([for r in google_secret_manager_secret.secrets["gmail-sender-credentials"].replication[0].user_managed[0].replicas : r.location == "asia-northeast1"])
+    error_message = "シークレットのレプリカは東京だけに置く。"
+  }
+}
+
+run "daily_job_sharded_and_weekly_fanout_queue" {
+  command = plan
+
+  assert {
+    condition     = google_cloud_run_v2_job.jobs["risk-engine-daily"].template[0].task_count == var.risk_daily_task_count && google_cloud_run_v2_job.jobs["calendar-sync-daily"].template[0].task_count == 1
+    error_message = "日次のリスクレベル判定は risk_daily_task_count で分割する。カレンダー同期は分割しない。"
+  }
+
+  assert {
+    condition     = google_cloud_tasks_queue.weekly_report.name == "weekly-report" && google_cloud_tasks_queue.weekly_report.location == "asia-northeast1"
+    error_message = "週次レポートのファンアウトには weekly-report キューを使い、東京に置く。"
+  }
+
+  assert {
+    condition     = local.ttl_fields["jobRuns"] == "expiresAt"
+    error_message = "分割処理の調整用ドキュメント jobRuns は TTL で削除する。"
   }
 }

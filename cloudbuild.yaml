@@ -8,6 +8,10 @@ substitutions:
   _TERRAFORM_IMAGE: hashicorp/terraform:1.13
   _PUBLISH_KB: 'false'
   _KB_VERSION: v0.1.0
+  _EVAL_GEMINI_JUDGE: 'false'
+  _GEMINI_MODEL_PET_CHAT: ''
+  _GEMINI_MODEL_EVAL_JUDGE: ''
+  _EVAL_BIGQUERY: 'false'
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -36,6 +40,7 @@ steps:
     args:
       - -c
       - |
+        set -eu
         corepack enable && corepack prepare pnpm@10.33.0 --activate
         pnpm lint
         pnpm typecheck
@@ -81,6 +86,33 @@ steps:
         for suite in crisis signal artwork pet; do
           node scripts/eval-run.mjs --suite "$$suite" --mode scripted
         done
+
+  - id: eval-gemini-judge
+    name: ${_NODE_IMAGE}
+    entrypoint: sh
+    waitFor: [eval-scripted]
+    env:
+      - EVAL_GEMINI_JUDGE=${_EVAL_GEMINI_JUDGE}
+      - GCP_PROJECT_ID=${PROJECT_ID}
+      - GCP_REGION=${_REGION}
+      - CRISIS_MODEL_MODE=vertex
+      - GEMINI_MODEL_PET_CHAT=${_GEMINI_MODEL_PET_CHAT}
+      - GEMINI_MODEL_EVAL_JUDGE=${_GEMINI_MODEL_EVAL_JUDGE}
+      - EVAL_BIGQUERY=${_EVAL_BIGQUERY}
+    args:
+      - -c
+      - |
+        set -eu
+        if [ "$$EVAL_GEMINI_JUDGE" != "true" ]; then
+          echo "Gemini judge skipped (explicit opt-in required)"
+          exit 0
+        fi
+        test -n "$$GEMINI_MODEL_PET_CHAT" && test -n "$$GEMINI_MODEL_EVAL_JUDGE" || { echo "Explicit pet and judge model IDs required"; exit 1; }
+        if [ "$$EVAL_BIGQUERY" = "true" ]; then
+          node scripts/eval-run.mjs --suite pet --mode vertex --vertex --judge gemini --bigquery
+        else
+          node scripts/eval-run.mjs --suite pet --mode vertex --vertex --judge gemini
+        fi
 
   - id: terraform-validate
     name: ${_TERRAFORM_IMAGE}
@@ -130,7 +162,7 @@ steps:
   - id: docker-build
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
-    waitFor: [test]
+    waitFor: [test, eval-scripted, eval-gemini-judge]
     args:
       - -c
       - |
