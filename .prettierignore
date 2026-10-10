@@ -1,6 +1,8 @@
 dist
 .next
 node_modules
+# pnpm keeps its store inside the workspace on Cloud Build (/workspace is its own volume)
+.pnpm-store
 pnpm-lock.yaml
 coverage
 /artifacts/e2e-*/

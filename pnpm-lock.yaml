@@ -56,6 +56,9 @@ importers:
       firebase:
         specifier: 12.19.0
         version: 12.19.0
+      kuromoji:
+        specifier: 0.1.2
+        version: 0.1.2
       lucide-react:
         specifier: 0.562.0
         version: 0.562.0(react@19.3.0)
@@ -108,6 +111,9 @@ importers:
       '@ijime/api-types':
         specifier: workspace:*
         version: link:../../packages/api-types
+      '@ijime/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       firebase:
         specifier: 12.19.0
         version: 12.19.0
@@ -185,6 +191,9 @@ importers:
       '@firebase/rules-unit-testing':
         specifier: ^5.0.2
         version: 5.0.2(firebase@12.19.0)
+      '@ijime/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       firebase:
         specifier: ^12.0.0
         version: 12.19.0
@@ -541,6 +550,9 @@ importers:
       '@ijime/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@ijime/crisis-detector':
+        specifier: workspace:*
+        version: link:../../packages/crisis-detector
       '@ijime/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
