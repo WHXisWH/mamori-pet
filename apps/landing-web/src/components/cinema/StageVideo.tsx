@@ -6,10 +6,6 @@ import { prefersReducedMotion } from './motion';
 
 export const SOUND_EVENT = 'mamori:sound';
 
-function soundOn(): boolean {
-  return typeof document !== 'undefined' && document.documentElement.dataset['sound'] === 'on';
-}
-
 export function StageVideo({
   src,
   poster,
@@ -26,8 +22,9 @@ export function StageVideo({
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
+    // The page's background music carries the sound; the clip's own audio stays muted.
     const sync = () => {
-      v.muted = !(active && soundOn());
+      v.muted = true;
     };
     sync();
     window.addEventListener(SOUND_EVENT, sync);

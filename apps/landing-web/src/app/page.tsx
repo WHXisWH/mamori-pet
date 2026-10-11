@@ -1,5 +1,6 @@
 import { Button, PetAvatar } from '@ijime/ui';
 
+import { BackgroundMusic } from '@/components/cinema/BackgroundMusic';
 import { SoundToggle } from '@/components/cinema/StageVideo';
 import { availableMedia } from '@/lib/media';
 
@@ -14,7 +15,6 @@ const GUARDIAN_APP_URL = process.env.NEXT_PUBLIC_GUARDIAN_APP_URL ?? 'http://loc
 
 export default function LandingPage() {
   const media = availableMedia();
-  const hasMedia = Object.keys(media).length > 0;
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-40 px-3 pt-[max(8px,calc((var(--bar-h)-56px)/2))] md:px-6">
@@ -100,7 +100,8 @@ export default function LandingPage() {
         </section>
       </main>
 
-      {hasMedia && <SoundToggle />}
+      <BackgroundMusic src="/music/landing.m4a" />
+      <SoundToggle />
 
       <footer className="border-t border-cream-deep bg-white py-10 text-sm text-ink-soft">
         <div className="mx-auto grid max-w-6xl gap-6 px-4 md:grid-cols-3 md:px-8">
