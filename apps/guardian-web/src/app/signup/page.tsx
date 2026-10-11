@@ -1,6 +1,6 @@
 'use client';
 
-import type { CreateFamilyRes } from '@ijime/api-types';
+import type { CreateFamilyRes, MeRes } from '@ijime/api-types';
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -79,7 +79,15 @@ export default function SignupPage() {
             });
             if (!LOCAL_TEST) await guardianIdToken(true);
             window.dispatchEvent(new Event('mamori-guardian-changed'));
-            router.push('/consent');
+            // 同意が済んでいる保護者はホームへ（子どもが未登録ならお子さんのページへ）。初回だけ同意へ
+            const me = await guardianRequest<MeRes>('/v1/me', { headers }).catch(() => undefined);
+            router.push(
+              !me || !me.family.consentComplete
+                ? '/consent'
+                : me.children.length
+                  ? '/'
+                  : '/children',
+            );
           } catch {
             setError(
               LOCAL_TEST
