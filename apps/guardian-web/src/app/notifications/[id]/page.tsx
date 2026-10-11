@@ -9,7 +9,7 @@ export default function NotificationPage() {
   return (
     <main className="mx-auto max-w-lg px-4 py-10">
       <GuardianHeader />
-      <Link className="mt-5 inline-block text-calm underline" href="/">
+      <Link className="mt-5 inline-block text-calm underline" href="/notifications">
         お知らせ一覧へ
       </Link>
       <NotificationView id={id} />

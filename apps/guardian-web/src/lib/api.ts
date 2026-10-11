@@ -1,4 +1,6 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8080';
+// 子ども用アプリの URL。ペアリング画面で保護者に見せる（docs/05-frontend.md ペアリング）
+export const CHILD_APP_URL = process.env.NEXT_PUBLIC_CHILD_APP_URL ?? 'http://localhost:3100';
 export const LOCAL_TEST =
   process.env.NEXT_PUBLIC_LOCAL_DEMO === '1' || process.env.NODE_ENV === 'development';
 

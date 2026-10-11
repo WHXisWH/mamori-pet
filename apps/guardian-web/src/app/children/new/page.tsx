@@ -7,18 +7,34 @@ import Link from 'next/link';
 
 import { GuardianApiError, guardianRequest } from '@/lib/api';
 import { useGuardian } from '@/components/GuardianShell';
+import { SetupSteps } from '@/components/SetupSteps';
 
 export default function NewChildPage() {
   const router = useRouter();
-  const { reloadFamily, selectChild } = useGuardian();
+  const { me, reloadFamily, selectChild } = useGuardian();
   const [nickname, setNickname] = useState('');
   const [gradeBand, setGradeBand] = useState<GradeBand>('high');
   const [key] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const duplicate = me?.children.find((c) => c.nickname === nickname.trim());
   return (
     <main className="mx-auto max-w-lg px-4 py-8">
-      <h1 className="text-2xl font-bold">子どもを登録</h1>
+      <SetupSteps current="register" />
+      <h1 className="mt-6 text-2xl font-bold">子どもを登録</h1>
+      {duplicate && (
+        <p
+          className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm leading-6"
+          data-testid="duplicate-child"
+        >
+          同じニックネームのお子さん「{duplicate.nickname}」がすでに登録されています（
+          {duplicate.paired ? '接続済み' : '未接続'}）。同じ子なら新しく登録せず、
+          <Link href={`/children/${duplicate.childId}/pairing`} className="text-calm underline">
+            端末をつなぐ
+          </Link>
+          へ進んでください。
+        </p>
+      )}
       <form
         className="mt-6 space-y-5"
         onSubmit={async (event) => {

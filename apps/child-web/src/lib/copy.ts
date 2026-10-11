@@ -114,7 +114,14 @@ type Copy = {
     confirmYes: string;
     confirmNo: string;
   };
-  pair: { title: string; hint: string; submit: string; error: string };
+  pair: {
+    title: string;
+    hint: string;
+    where: string;
+    submit: string;
+    error: string;
+    expired: string;
+  };
   welcome: { pages: { title: string; body: string }[]; agree: string; next: string };
   choose: { title: string; name: string; namePlaceholder: string; go: string; egg: string };
   settings: {
@@ -275,8 +282,12 @@ export const COPY: Record<GradeBand, Copy> = {
     pair: {
       title: 'おうちの ひとから もらった かずを いれてね',
       hint: '6つの すうじ',
+      where:
+        'かずは、おうちの ひとの アプリの「おこさん」→「たんまつを つなぐ」に でるよ。10ぷんだけ つかえるよ。',
       submit: 'つなぐ',
       error: 'ちがう みたい。おうちの ひとに きいてね。',
+      expired:
+        'この かずは もう つかえないよ。おうちの ひとに あたらしい かずを だして もらってね。',
     },
     welcome: {
       pages: [
@@ -455,8 +466,11 @@ export const COPY: Record<GradeBand, Copy> = {
     pair: {
       title: 'おうちの人からもらった番号を入れてね',
       hint: '6けたの数字',
+      where:
+        '番号は、おうちの人のアプリの「お子さん」→「端末をつなぐ」に出ます。10分だけ使えます。',
       submit: 'つなぐ',
       error: '違うみたい。おうちの人に聞いてね。',
+      expired: 'この番号はもう使えないよ。おうちの人に新しい番号を出してもらってね。',
     },
     welcome: {
       pages: [
@@ -632,7 +646,9 @@ export const COPY: Record<GradeBand, Copy> = {
     pair: {
       title: '保護者からもらったコードを入力',
       hint: '6けたの数字',
+      where: '番号は、家の人のアプリの「お子さん」→「端末をつなぐ」に出ます。10分だけ使えます。',
       submit: 'つなぐ',
+      expired: 'この番号はもう使えない。家の人に新しい番号を出してもらってね。',
       error: 'コードが違うか、期限切れです。',
     },
     welcome: {

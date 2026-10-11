@@ -32,7 +32,12 @@ export default function PairPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code }),
               });
-              if (!response.ok) return false;
+              if (!response.ok) {
+                const body = (await response.json().catch(() => null)) as {
+                  error?: { code?: string };
+                } | null;
+                return body?.error?.code === 'PAIRING_CODE_EXPIRED' ? 'expired' : false;
+              }
               const result = (await response.json()) as PairRes;
               await signInPairedChild(result.customToken, result.childId);
               useChildStore.getState().reset();

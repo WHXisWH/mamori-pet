@@ -4,12 +4,14 @@ import { NotificationList } from '@/components/Notifications';
 import { ChildPicker, useGuardian } from '@/components/GuardianShell';
 import { InstallHint } from '@/components/PushRegistration';
 import { WeeklyReport } from '@/components/WeeklyReport';
+import { GettingStarted } from '@/components/GettingStarted';
 
 export default function HomePage() {
   const { childId, me } = useGuardian();
   return (
     <main className="mx-auto max-w-5xl px-4 pb-12 sm:px-6">
       <ChildPicker />
+      <GettingStarted />
       {childId && me?.family.consentComplete && <WeeklyReport key={childId} childId={childId} />}
       <NotificationList childId={childId} />
       <InstallHint />

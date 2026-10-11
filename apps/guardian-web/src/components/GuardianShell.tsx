@@ -9,9 +9,13 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  LogOut,
 } from 'lucide-react';
+import { signOut } from 'firebase/auth';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+
+import { guardianAuth } from '@/lib/auth';
 import {
   createContext,
   useCallback,
@@ -98,6 +102,7 @@ function Header() {
               {label}
             </Link>
           ))}
+          <LogoutButton />
         </nav>
       </div>
       {LOCAL_TEST && (
@@ -109,6 +114,30 @@ function Header() {
         </p>
       )}
     </header>
+  );
+}
+
+function LogoutButton() {
+  const router = useRouter();
+  return (
+    <button
+      type="button"
+      data-testid="guardian-logout"
+      className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-ink/5"
+      onClick={async () => {
+        try {
+          localStorage.removeItem('mamori-guardian-id');
+        } catch {
+          // nothing stored
+        }
+        const auth = guardianAuth();
+        if (auth) await signOut(auth).catch(() => undefined);
+        router.push('/signup');
+      }}
+    >
+      <LogOut size={18} aria-hidden />
+      ログアウト
+    </button>
   );
 }
 
