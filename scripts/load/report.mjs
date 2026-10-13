@@ -176,7 +176,12 @@ export function buildReport({ run, inputs, pilot, voice, monthlyCostJpy }) {
     `生成日時：${new Date().toISOString()}。合成アカウントと合成テキストだけを使用。`,
     '',
   ];
-  out.push('## パイロット目標との比較', '', '| 指標 | 実測 | 目標 | 結論 |', '| --- | --- | --- | --- |');
+  out.push(
+    '## パイロット目標との比較',
+    '',
+    '| 指標 | 実測 | 目標 | 結論 |',
+    '| --- | --- | --- | --- |',
+  );
   for (const label of ['sse40', 'sustained']) {
     const l = inputs[`logs-${label}`];
     if (!l) continue;

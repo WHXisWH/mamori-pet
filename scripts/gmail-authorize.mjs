@@ -27,7 +27,9 @@ const code = await new Promise((resolve, reject) => {
     const error = url.searchParams.get('error');
     const value = url.searchParams.get('code');
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end(error ? `認可に失敗しました: ${error}` : '認可が完了しました。このタブは閉じて構いません。');
+    res.end(
+      error ? `認可に失敗しました: ${error}` : '認可が完了しました。このタブは閉じて構いません。',
+    );
     server.close();
     if (error || !value) reject(new Error(error ?? 'no code'));
     else resolve(value);

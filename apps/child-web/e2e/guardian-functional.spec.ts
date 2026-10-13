@@ -50,7 +50,8 @@ test('guardian settings displays the same five rules as the child, including fam
   const card = page.getByTestId('rule-card');
   await expect(card).toBeVisible();
   await expect(card.locator('li')).toHaveCount(5);
-  for (const line of RULE_CARD_LINES.jhs) await expect(card).toContainText(line);
+  // カードは選んだ子どもの学年帯に合わせて表示される（ここでは2人とも high）
+  for (const line of RULE_CARD_LINES.high) await expect(card).toContainText(line);
   for (const [width, height] of [
     [393, 852],
     [1440, 900],
