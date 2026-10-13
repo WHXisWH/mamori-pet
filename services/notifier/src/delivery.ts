@@ -68,6 +68,17 @@ export async function handleSendTask(deps: NotifierDeps, task: SendTask): Promis
   if (task.round > 0 && notif.acknowledgedAt) throw new SkipEvent('already_acknowledged');
   if (!notif.recipientIds.includes(task.guardianId) || !notif.channels.includes(task.channel))
     throw new SkipEvent('notification_recipient_removed');
+  // Cloud Tasks は少なくとも1回実行され、同名タスクの重複排除も期限が切れる。この回がすでに届いていれば送らない（完全に同時に走った2回の実行では、両方とも送られることがまだありうる）
+  if (
+    (notif.attempts ?? []).some(
+      (a) =>
+        a.guardianId === task.guardianId &&
+        a.channel === task.channel &&
+        a.round === task.round &&
+        a.result === 'sent',
+    )
+  )
+    throw new SkipEvent('already_sent');
   const result = guardian
     ? await deps.senders[task.channel].send(guardian, msg)
     : ({ ok: false, reason: 'no_target', retryable: false } as const);

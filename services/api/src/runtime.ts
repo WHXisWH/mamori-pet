@@ -34,10 +34,13 @@ import {
   AdcGoogleHttp,
   CloudTasksRestQueue,
   crisisRecheckRequesterFromEnv,
+  crisisRedeliveryRequesterFromEnv,
+  type CrisisRedeliveryRequester,
   GoogleCalendarApi,
   Logger,
   MemoryTaskQueue,
   PubSubRestPublisher,
+  withCrisisDelivery,
   type TaskQueue,
   type OAuthClientConfig,
 } from '@ijime/service-kit';
@@ -134,6 +137,7 @@ export async function createApiRuntime(
       accounts?: Partial<AccountDeps>;
       proactiveQueue?: TaskQueue;
       proactiveDispatchToken?: string;
+      requestCrisisRedelivery?: CrisisRedeliveryRequester;
     } = {},
 ): Promise<ApiRuntime> {
   const env = loadEnv();
@@ -215,6 +219,17 @@ export async function createApiRuntime(
       };
     }
   }
+  // crisis.detected：回数を限って再試行し、失敗したら Cloud Tasks で再送する。決して例外を投げない（2026-10-12 決定）
+  publish = withCrisisDelivery(publish, {
+    logger,
+    redeliver:
+      overrides.requestCrisisRedelivery ??
+      crisisRedeliveryRequesterFromEnv({
+        prod: env.NODE_ENV === 'production',
+        projectId: env.GCP_PROJECT_ID,
+        location: env.GCP_REGION,
+      }),
+  });
   const auth =
     overrides.auth ??
     ({

@@ -395,18 +395,22 @@ export function registerChat(app: ServiceApp, getDeps: () => Promise<ChatDeps>):
           );
           await deps.sessions.markSafeMode(childId, sessionId);
           const routing = routingOfCheck(check);
-          await deps.publish('crisis.detected', { childId, crisisId: crisisRef.id, ...routing });
-          log.warn('crisis.detected', { pseudoId: childId, crisisId: crisisRef.id, ...routing });
           const { message, resources } = crisisResponse({
             familyHarmSuspected: check.familyHarmSuspected,
             gradeBand: child.gradeBand,
             copy: deps.safeModeCopy,
             hotlines: deps.hotlines,
           });
-          await s.writeSSE({
-            event: 'crisis',
-            data: JSON.stringify({ crisisId: crisisRef.id, message, resources }),
-          });
+          // 先に子どもへ相談窓口を案内してから下流に通知する。子どもの接続が切れても発行する（2026-10-12 決定）
+          try {
+            await s.writeSSE({
+              event: 'crisis',
+              data: JSON.stringify({ crisisId: crisisRef.id, message, resources }),
+            });
+          } finally {
+            await deps.publish('crisis.detected', { childId, crisisId: crisisRef.id, ...routing });
+            log.warn('crisis.detected', { pseudoId: childId, crisisId: crisisRef.id, ...routing });
+          }
           return;
         }
         try {
@@ -420,27 +424,30 @@ export function registerChat(app: ServiceApp, getDeps: () => Promise<ChatDeps>):
               const record = await deps.db.doc(`${base}/crisisEvents/${chunk.crisisId}`).get();
               const routing = routingOfRecord(record.data() ?? {});
               await deps.sessions.markSafeMode(childId, sessionId);
-              await deps.publish('crisis.detected', {
-                childId,
-                crisisId: chunk.crisisId,
-                ...routing,
-              });
-              log.warn('crisis.detected', {
-                pseudoId: childId,
-                crisisId: chunk.crisisId,
-                source: 'agent_tool',
-                ...routing,
-              });
               const { message, resources } = crisisResponse({
                 familyHarmSuspected: routing.familyHarmSuspected,
                 gradeBand: child.gradeBand,
                 copy: deps.safeModeCopy,
                 hotlines: deps.hotlines,
               });
-              await s.writeSSE({
-                event: 'crisis',
-                data: JSON.stringify({ crisisId: chunk.crisisId, message, resources }),
-              });
+              try {
+                await s.writeSSE({
+                  event: 'crisis',
+                  data: JSON.stringify({ crisisId: chunk.crisisId, message, resources }),
+                });
+              } finally {
+                await deps.publish('crisis.detected', {
+                  childId,
+                  crisisId: chunk.crisisId,
+                  ...routing,
+                });
+                log.warn('crisis.detected', {
+                  pseudoId: childId,
+                  crisisId: chunk.crisisId,
+                  source: 'agent_tool',
+                  ...routing,
+                });
+              }
               return;
             }
             if (chunk.type === 'delta') {

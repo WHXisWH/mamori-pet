@@ -1,8 +1,10 @@
 import { withChildScope } from '@ijime/agent-core';
 import {
   CRISIS_RECHECK_PATH,
+  CRISIS_REDELIVERY_PATH,
   createServiceApp,
   crisisRecheckTaskSchema,
+  crisisRedeliveryTaskSchema,
   eventSchemas,
   registerPushHandler,
   registerTaskHandler,
@@ -58,5 +60,11 @@ export function createApp(getDeps?: () => Promise<SignalWorkerDeps>, logger?: Lo
   registerTaskHandler(app, CRISIS_RECHECK_PATH, crisisRecheckTaskSchema, async (task) =>
     handleCrisisRecheck(await deps(), task),
   );
+  // api / voice-relay がリクエスト内で crisis.detected の発行に失敗したあとの再送。失敗したら 5xx を返し、キューがバックオフして再試行する
+  registerTaskHandler(app, CRISIS_REDELIVERY_PATH, crisisRedeliveryTaskSchema, async (task) => {
+    const d = await deps();
+    await d.publisher.publish('crisis.detected', task);
+    d.logger.warn('crisis.redelivered', { crisisId: task.crisisId });
+  });
   return app;
 }

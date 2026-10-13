@@ -220,9 +220,15 @@ export function createPetTools(
       return { ok: true };
     }),
     tool('remember', async ({ content, category }) => {
-      const sanitized = executor.prepareMemory
-        ? await executor.prepareMemory(ctx, content)
-        : content;
+      let sanitized = content;
+      if (executor.prepareMemory) {
+        // 人名の認識に失敗したら保存しない。モデルには原文を含まないエラーを返す
+        try {
+          sanitized = await executor.prepareMemory(ctx, content);
+        } catch {
+          return { error: 'memory_privacy_unavailable' };
+        }
+      }
       const result = await executor.remember(ctx, sanitized, category);
       if ('proposalId' in result)
         onAction({

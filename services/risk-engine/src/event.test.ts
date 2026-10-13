@@ -206,6 +206,20 @@ describe('event mode: explicit statement → L3 and one consultation', () => {
 });
 
 describe('crisis.detected → L4', () => {
+  it('concurrent duplicate deliveries still create one assessment and one consultation', async () => {
+    const [f, c] = ['f_re_conc', 'c_re_conc'];
+    await seedChild(f, c);
+    await seedSignal(f, c, 's1', 'a', true);
+    const t = setup();
+    const ev = { childId: c, domains: ['a'], explicit: true };
+    const codes = await Promise.all([1, 2, 3].map(() => t.push('/internal/assess', ev)));
+    // 競合した回は失敗して Pub/Sub の再配信に任せてよいが、重複した記録を残してはならない
+    expect(codes.some((r) => r.status === 204)).toBe(true);
+    expect(await list(`families/${f}/children/${c}/riskAssessments`)).toHaveLength(1);
+    expect(await list(`families/${f}/children/${c}/consultations`)).toHaveLength(1);
+    expect(t.tasks.take('consultation-timeout')).toHaveLength(1);
+  });
+
   it('writes an L4 assessment once and publishes the change', async () => {
     const [f, c] = ['f_re5', 'c_re5'];
     await seedChild(f, c, 'l1');

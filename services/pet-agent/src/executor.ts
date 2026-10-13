@@ -17,7 +17,7 @@ import { ApiHttpError, type Logger, type Publisher } from '@ijime/service-kit';
 import { gamePromptsFor, loadGames, type GameCatalog, type Kb } from '@ijime/kb-loader';
 
 import { asDate, consultationPending, jstParts, readChildContext } from './context.js';
-import { createMemorySanitizer, type NameDetector } from './pseudonyms.js';
+import { createMemorySanitizer, createPseudonymReader, type NameDetector } from './pseudonyms.js';
 import { recallableMemory, type MemorySearch } from './memory-search.js';
 
 export async function assertSession(
@@ -92,6 +92,7 @@ export function createExecutor(input: {
   let gamesCache: Promise<GameCatalog> | undefined;
   const sessionRef = db.doc(`${base}/sessions/${sessionId}`);
   const sanitizeMemory = createMemorySanitizer(input);
+  const pseudonymsOf = createPseudonymReader(input);
   const verify = (ctx: TurnContext) => {
     if (ctx.childId !== child.childId || ctx.sessionId !== sessionId)
       throw new ApiHttpError('PERMISSION_DENIED', 'tool context mismatch');
@@ -252,7 +253,9 @@ export function createExecutor(input: {
         const createdAt = asDate(data['createdAt']);
         return [{ text, ...(createdAt ? { createdAt } : {}) }];
       });
-      return rankMemories(topic, candidates, agent.recallMaxMemories).map((m) => m.text);
+      // 記憶に保存されているのは仮名で、子どもが言うのは元の名前。先に対応表で仮名に置き換えてから照合する
+      const query = await pseudonymsOf(topic);
+      return rankMemories(query, candidates, agent.recallMaxMemories).map((m) => m.text);
     },
     suggestGame: async (ctx, game) => {
       if (!PET_REQUEST_TYPES.includes(game as PetRequestType)) return false;

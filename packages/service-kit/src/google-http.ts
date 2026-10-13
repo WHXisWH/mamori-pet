@@ -89,7 +89,16 @@ export class PlainHttp implements GoogleHttp {
       method: req.method,
       headers: { 'Content-Type': 'application/json' },
       ...(req.body === undefined ? {} : { body: JSON.stringify(req.body) }),
-      ...(req.signal ? { signal: req.signal } : {}),
+      ...(req.signal || req.timeoutMs !== undefined
+        ? {
+            signal: AbortSignal.any(
+              [
+                req.signal,
+                req.timeoutMs === undefined ? undefined : AbortSignal.timeout(req.timeoutMs),
+              ].filter((s): s is AbortSignal => s !== undefined),
+            ),
+          }
+        : {}),
     });
     const text = await res.text();
     if (!res.ok) throw new GoogleHttpError(res.status, text);

@@ -616,3 +616,57 @@ describe('crisis categories', () => {
     expect(await readNotification(f, crisisNotificationId(c, k))).toBeDefined();
   });
 });
+
+// Cloud Tasks は少なくとも1回実行される。同じタスクが2回実行されることがあり、タスク名による重複排除も完了後およそ1時間しか効かない。
+// その後に重複した crisis.detected（再送キューが長く再試行したあとに届いたものなど）が来ると、同じ名前のタスクがまた作られる
+describe('at-least-once delivery never notifies a guardian twice for the same round', () => {
+  it('a send task executed twice sends once', async () => {
+    const [f, c, k] = ['f_dup1', 'c_dup1', 'k_dup1'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k));
+    const sends = t.tasks.take('notify-send');
+    expect(await t.run(sends)).toEqual([204, 204, 204]);
+    expect(await t.run(sends)).toEqual([204, 204, 204]);
+    expect(t.webpush.sent).toHaveLength(1);
+    expect(t.email.sent).toHaveLength(1);
+    expect(t.sms.sent).toHaveLength(1);
+    const notif = await readNotification(f, crisisNotificationId(c, k));
+    expect(notif!.attempts).toHaveLength(3);
+  });
+
+  it('a late duplicate crisis event, after task-name dedupe has expired, sends nothing new', async () => {
+    const [f, c, k] = ['f_dup2', 'c_dup2', 'k_dup2'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    await t.post('/internal/events/crisis-detected', crisisEvent(c, k));
+    await t.run(t.tasks.take('notify-send'));
+    t.tasks.take('crisis-escalation');
+    expect(t.webpush.sent).toHaveLength(1);
+
+    // Cloud Tasks の同名タスクの重複排除期間が過ぎた状態を再現する。同じ名前のタスクがまた作れる
+    (t.tasks as unknown as { ids: Set<string> }).ids.clear();
+    t.advance(2 * 60 * 60_000);
+    expect((await t.post('/internal/events/crisis-detected', crisisEvent(c, k))).status).toBe(204);
+    await t.run(t.tasks.take('notify-send'));
+    expect(t.webpush.sent).toHaveLength(1);
+    expect(t.email.sent).toHaveLength(1);
+    expect((await db.collection(`families/${f}/notifications`).get()).size).toBe(1);
+  });
+
+  it('concurrent duplicate crisis events create one notification', async () => {
+    const [f, c, k] = ['f_dup3', 'c_dup3', 'k_dup3'];
+    await seedFamily(f, c);
+    await seedCrisis(f, c, k, false);
+    const t = setup();
+    const codes = await Promise.all(
+      [1, 2, 3].map(() => t.post('/internal/events/crisis-detected', crisisEvent(c, k))),
+    );
+    expect(codes.map((r) => r.status).every((s) => s < 300)).toBe(true);
+    expect((await db.collection(`families/${f}/notifications`).get()).size).toBe(1);
+    await t.run(t.tasks.take('notify-send'));
+    expect(t.webpush.sent).toHaveLength(1);
+  });
+});

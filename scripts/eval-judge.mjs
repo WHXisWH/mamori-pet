@@ -1,8 +1,4 @@
-import { createRequire } from 'node:module';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-import { REGION, ROOT, importLocal } from './eval-common.mjs';
+import { REGION, importLocal } from './eval-common.mjs';
 
 const config = await importLocal('packages/config/dist/index.js');
 const core = await importLocal('packages/agent-core/dist/index.js');
@@ -37,9 +33,7 @@ export async function createGeminiJudge(kb, env, { model, timeoutMs } = {}) {
     ),
   );
   core.disableAdkContentCapture();
-  const require = createRequire(join(ROOT, 'packages/agent-core/package.json'));
-  const adk = await import(pathToFileURL(require.resolve('@google/adk')).href);
-  adk.setLogger(null);
+  core.silenceAdkLogger();
   const llm =
     model ?? core.createGemini('evalJudge', { projectId: env.GCP_PROJECT_ID, location: REGION });
   const route = config.models.evalJudge;

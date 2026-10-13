@@ -212,6 +212,9 @@ test('Gemini adapter sends the KB rubric and context once, with bounded JSON-onl
     },
   };
   const judge = await createGeminiJudge(kb, judgeEnv, { model });
+  // agent-core が実際に使っている ADK のログを止めなければならない。そうしないとモデルが返したツール名がログと JSON 出力に入る
+  const core = await importLocal('packages/agent-core/dist/index.js');
+  assert.equal(core.isAdkLoggerSilenced(), true);
   assert.deepEqual(await judge(input, turns), cleanJudge);
   assert.equal(calls, 1);
   await assert.rejects(judge({ ...input, source: 'production' }, turns), /synthetic_required/);
@@ -450,9 +453,11 @@ test('Cloud Build preserves the scripted gate and skips Gemini unless explicitly
   assert.equal(build.substitutions._EVAL_BIGQUERY, 'false');
   assert.match(judge.args[1], /EVAL_BIGQUERY.*true/);
   assert.match(judge.args[1], /--bigquery/);
-  assert.ok(
-    build.steps.find((step) => step.id === 'docker-build').waitFor.includes('eval-gemini-judge'),
-  );
+  for (const id of ['docker-build', 'kb-publish']) {
+    const step = build.steps.find((s) => s.id === id);
+    for (const gate of ['eval-scripted', 'eval-gemini-judge'])
+      assert.ok(step.waitFor.includes(gate), `${id} must wait for ${gate}`);
+  }
   const command = judge.args[1].replaceAll('$$', '$');
   // Resolve the shell absolutely because a missing PATH proves no node was launched.
   const run = (enabled) =>

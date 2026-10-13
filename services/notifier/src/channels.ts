@@ -1,4 +1,5 @@
 import type { NotifyChannel } from '@ijime/api-types';
+import { outbound } from '@ijime/config';
 import { GoogleHttpError, type GoogleHttp, type Logger } from '@ijime/service-kit';
 import { z } from 'zod';
 
@@ -49,6 +50,7 @@ export class FcmSender implements ChannelSender {
               data: { notificationId: msg.notificationId },
             },
           },
+          timeoutMs: outbound.googleApiTimeoutMs,
         });
         delivered++;
       } catch (err) {

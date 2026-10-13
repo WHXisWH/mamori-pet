@@ -49,41 +49,21 @@ describe('pet ADK callbacks', () => {
     expect(rescued?.content?.parts).toEqual([safety, { text: 'うん。' }]);
   });
 
-  it('sanitizes remember args before execution and leaves unrelated tools alone', async () => {
-    const prepareMemory = vi.fn(async () => 'おともだちAと遊ぶ');
-    const callback = single(
-      createPetCallbacks({ filter, safeReply: 'うん。', prepareMemory }).beforeToolCallback,
-    );
+  it('leaves remember args for the tool, which pseudonymizes after the budget check', async () => {
+    const callback = single(createPetCallbacks({ filter, safeReply: 'うん。' }).beforeToolCallback);
     const args = { content: '田中くんと遊ぶ', category: 'person' };
     expect(await callback({ tool: { name: 'remember' } as never, args, context })).toBeUndefined();
-    expect(args.content).toBe('おともだちAと遊ぶ');
-    expect(
-      await callback({
-        tool: { name: 'escalate_crisis' } as never,
-        args: { category: 'violence' },
-        context,
-      }),
-    ).toBeUndefined();
-    expect(prepareMemory).toHaveBeenCalledTimes(1);
+    expect(args.content).toBe('田中くんと遊ぶ');
   });
 
-  it('does not execute malformed, blocked or unsanitizable memory arguments', async () => {
-    const prepareMemory = vi.fn(async () => {
-      throw new Error('private text');
-    });
-    const callback = single(
-      createPetCallbacks({ filter, safeReply: 'うん。', prepareMemory }).beforeToolCallback,
-    );
+  it('does not execute malformed or blocked memory arguments', async () => {
+    const callback = single(createPetCallbacks({ filter, safeReply: 'うん。' }).beforeToolCallback);
     const call = (args: Record<string, unknown>) =>
       callback({ tool: { name: 'remember' } as never, args, context });
     expect(await call({})).toEqual({ error: 'invalid_arguments' });
     expect(await call({ content: '二人だけの秘密', category: 'other' })).toEqual({
       error: 'output_blocked',
     });
-    expect(await call({ content: '田中くん', category: 'person' })).toEqual({
-      error: 'memory_privacy_unavailable',
-    });
-    expect(prepareMemory).toHaveBeenCalledTimes(1);
   });
 
   it('blocks phrases split across streaming chunks without leaking them in errors', async () => {

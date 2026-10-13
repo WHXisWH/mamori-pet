@@ -7,7 +7,6 @@ import { createGamePreferenceGuard, type GamePreferenceRules } from './game-pref
 export function createPetCallbacks(input: {
   filter: OutputFilter;
   safeReply: string;
-  prepareMemory?: (content: string) => Promise<string>;
   inspectOutput?: (text: string) => Promise<boolean>;
   gamePreferenceRules?: GamePreferenceRules;
 }): {
@@ -25,14 +24,8 @@ export function createPetCallbacks(input: {
     if (tool.name !== 'remember') return;
     const parsed = petToolSchemas.remember.strict().safeParse(args);
     if (!parsed.success) return { error: 'invalid_arguments' };
+    // 仮名化はツールの中で、ツール予算のチェックの後に行う。予算で拒否された呼び出しで、先に人名の認識や仮名の対応表の書き込みをしてはならない
     if (!input.filter.check(parsed.data.content).ok) return { error: 'output_blocked' };
-    if (input.prepareMemory) {
-      try {
-        args['content'] = await input.prepareMemory(parsed.data.content);
-      } catch {
-        return { error: 'memory_privacy_unavailable' };
-      }
-    }
     return undefined;
   };
   const afterModelCallback: AfterModelCallback = async ({ context, response }) => {

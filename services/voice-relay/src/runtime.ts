@@ -17,8 +17,11 @@ import { FsKbSource, Kb, outputFilterSchema, safeRepliesSchema } from '@ijime/kb
 import {
   cloudRunIdToken,
   crisisRecheckRequesterFromEnv,
+  crisisRedeliveryRequesterFromEnv,
   Logger,
   PubSubRestPublisher,
+  withCrisisDelivery,
+  type CrisisRedeliveryRequester,
 } from '@ijime/service-kit';
 
 import type { VoiceBackendDeps } from './backend.js';
@@ -30,7 +33,9 @@ export const RETRY_LINES_PATH = 'templates/voice_retry.ja.yaml';
 export const PAUSED_LINES_PATH = 'templates/model_unavailable.ja.yaml';
 
 export async function createVoiceRuntime(
-  overrides: Partial<VoiceBackendDeps> = {},
+  overrides: Partial<VoiceBackendDeps> & {
+    requestCrisisRedelivery?: CrisisRedeliveryRequester;
+  } = {},
 ): Promise<VoiceBackendDeps> {
   disableAdkContentCapture();
   const env = loadEnv();
@@ -124,7 +129,17 @@ export async function createVoiceRuntime(
       }),
     safeModeCopy: overrides.safeModeCopy ?? (await loadSafeModeCopy(kb)),
     hotlines: overrides.hotlines ?? (await loadHotlines(kb)).resources,
-    publish,
+    // crisis.detected：回数を限って再試行し、失敗したら Cloud Tasks で再送する。決して例外を投げない（2026-10-12 決定）
+    publish: withCrisisDelivery(publish, {
+      logger,
+      redeliver:
+        overrides.requestCrisisRedelivery ??
+        crisisRedeliveryRequesterFromEnv({
+          prod,
+          projectId: env.GCP_PROJECT_ID,
+          location: env.GCP_REGION,
+        }),
+    }),
     callTool:
       overrides.callTool ??
       httpToolCaller(petAgentUrl, prod ? cloudRunIdToken(petAgentUrl) : undefined),

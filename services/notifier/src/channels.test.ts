@@ -1,7 +1,8 @@
+import { outbound } from '@ijime/config';
 import { Logger } from '@ijime/service-kit';
 import { describe, expect, it, vi } from 'vitest';
 
-import { GmailSender, gmailCredentialsSchema, LogOnlySender } from './channels.js';
+import { FcmSender, GmailSender, gmailCredentialsSchema, LogOnlySender } from './channels.js';
 import type { GuardianContact } from './recipients.js';
 
 const to: GuardianContact = {
@@ -187,5 +188,26 @@ describe('GmailSender', () => {
     expect(gmailCredentialsSchema.safeParse(creds).success).toBe(true);
     expect(gmailCredentialsSchema.safeParse({ ...creds, sender: 'nope' }).success).toBe(false);
     expect(gmailCredentialsSchema.safeParse({ ...creds, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe('FCM web push', () => {
+  it('bounds every FCM request by the outbound timeout', async () => {
+    const calls: { timeoutMs?: number }[] = [];
+    const sender = new FcmSender('p', {
+      request: async (req: { timeoutMs?: number }) => {
+        calls.push(req);
+        return {} as never;
+      },
+    } as never);
+    const result = await sender.send(
+      { guardianId: 'g1', fcmTokens: ['t1', 't2'] } as never,
+      { notificationId: 'n1', pushTitle: 't', pushBody: 'b', email: {} } as never,
+    );
+    expect(result).toMatchObject({ ok: true, delivered: 2 });
+    expect(calls.map((c) => c.timeoutMs)).toEqual([
+      outbound.googleApiTimeoutMs,
+      outbound.googleApiTimeoutMs,
+    ]);
   });
 });

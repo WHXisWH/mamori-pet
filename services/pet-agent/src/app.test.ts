@@ -608,6 +608,37 @@ describe('pet-agent /internal/turns', () => {
     expect(await executor.recall(ctx, 'サッカー')).toEqual([]);
   });
 
+  // 記憶には仮名が保存されているが、子どもが思い出そうとするときは元の名前で言う。ローカルで思い出すときは先に既存の対応表で仮名に置き換え、思い出す処理では対応表に書き込まない
+  it('recalls a pseudonymized memory by the original name without adding new mappings', async () => {
+    const childId = `c_recall_alias_${randomUUID().slice(0, 8)}`;
+    const session = await sessions.createSession({ appName: PET_APP_NAME, userId: childId });
+    const child = (await runtime.directory.lookup(childId))!;
+    const base = `families/${child.familyId}/children/${childId}`;
+    const executor = runtime.executorFor(child, session.id, []);
+    const ctx = {
+      childId,
+      sessionId: session.id,
+      gradeBand: child.gradeBand,
+      characterId: child.characterId,
+    };
+    const saved = await executor.prepareMemory!(ctx, '田中くんとサッカーした');
+    expect(saved).not.toContain('田中');
+    await db.doc(`${base}/memories/m_alias`).set({
+      contentEnc: sessions.encryptForChild(child, saved, `${base}/memories#contentEnc`),
+      category: 'person',
+      status: 'accepted',
+      characterId: child.characterId,
+      createdAt: new Date(),
+    });
+    const mapRef = db.doc(`${base}/private/pseudonyms`);
+    const before = (await mapRef.get()).get('mapEnc');
+
+    expect(await executor.recall(ctx, '田中')).toEqual([saved]);
+    // 思い出すときに見たことのない名前が出てきても、人名の認識はせず、対応表にも書き込まない
+    await executor.recall(ctx, '鈴木くんのこと');
+    expect(Buffer.from((await mapRef.get()).get('mapEnc')).equals(Buffer.from(before))).toBe(true);
+  });
+
   it.each(['low', 'high'] as const)(
     'grounds help in the %s coaching first line only after committing, without storing it',
     async (gradeBand) => {

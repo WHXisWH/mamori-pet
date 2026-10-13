@@ -90,15 +90,31 @@ function summary(id: string, n: StoredNotification): NotificationSummary {
   return out;
 }
 
+// 入れ子のオブジェクトもフィールドを1つずつ選ぶ。保存データにある余分なフィールドをそのまま保護者に渡してはならない
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
+
+function resource(r: HelpResource): HelpResource {
+  return {
+    id: r.id,
+    name: r.name,
+    audience: r.audience,
+    ...(r.phone !== undefined ? { phone: r.phone } : {}),
+    ...(r.url !== undefined ? { url: r.url } : {}),
+    ...(r.hours !== undefined ? { hours: r.hours } : {}),
+  };
+}
+
 function detail(id: string, n: StoredNotification): NotificationDetail {
+  const { suggestions, reason } = n.payload;
   return {
     ...summary(id, n),
-    changes: n.payload.changes ?? [],
+    changes: strings(n.payload.changes),
     meaning: n.payload.meaning ?? '',
-    suggestions: n.payload.suggestions ?? { try: [], avoid: [] },
+    suggestions: { try: strings(suggestions?.try), avoid: strings(suggestions?.avoid) },
     childSummary: n.payload.childSummary ?? null,
-    resources: n.payload.resources ?? [],
-    reason: n.payload.reason ?? { domains: [], days: 0 },
+    resources: (n.payload.resources ?? []).map(resource),
+    reason: { domains: strings(reason?.domains), days: reason?.days ?? 0 },
     ...(n.feedback
       ? {
           feedback: {

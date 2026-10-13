@@ -758,3 +758,60 @@ test('デモ07：おはなしのお絵かき、島での表現、音声のフォ
     'クラウドのバックアップ、データウェアハウス、複数ストレージにまたがる物理削除の完了は検証していない。',
   );
 });
+
+// PRD のリスクレベル分類 L3：子どもが被害をはっきり話したら、まず本人の同意を求める。子どもが断ったときは、保護者には事前に説明してある「内容を含まないお知らせ」だけが届く
+test('L3 refusal: the guardian gets a content-free hint, never the child’s words', async ({
+  page,
+  context,
+}) => {
+  const f = await family(page);
+  const disclosure = '今日、学校でみんなに無視されてつらい';
+  await page.goto('/chat');
+  await expect(page.getByTestId('chat-input')).toBeEnabled();
+  await page.getByTestId('chat-input').fill(disclosure);
+  await page.getByTestId('chat-send').click();
+  await expect(page.getByTestId('chat-panel')).toHaveAttribute('data-status', 'idle');
+
+  // リスクエンジンが裏側で L3 と判定して相談を始める。子どもは会話の中で押し付けられるのではなく、ホームの入口から入る
+  const entry = page.locator('a[href^="/tell?consultationId="]');
+  await expect
+    .poll(
+      async () => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        return entry.count();
+      },
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
+  await entry.first().click();
+  const chosen = page.waitForResponse((r) => r.url().endsWith('/choice'));
+  await page.getByTestId('choice-not_now').click();
+  expect((await (await chosen).json()).notificationQueued).toBe(true);
+
+  const guardian = await context.newPage();
+  let notificationId = '';
+  await expect
+    .poll(async () => {
+      const { items } = await (
+        await guardian.request.get(`${API}/v1/notifications`, { headers: f.guardianHeaders })
+      ).json();
+      notificationId =
+        (items as { id: string; kind: string }[]).find((n) => n.kind === 'content_free_alert')
+          ?.id ?? '';
+      return notificationId;
+    })
+    .not.toBe('');
+  const detail = await (
+    await guardian.request.get(`${API}/v1/notifications/${notificationId}`, {
+      headers: f.guardianHeaders,
+    })
+  ).json();
+  expect(detail.childSummary).toBeNull();
+  expect(JSON.stringify(detail)).not.toMatch(/無視|つらい/);
+
+  await guardianPage(guardian, f.guardianId, `/notifications/${notificationId}`);
+  await expect(guardian.getByTestId('notification-detail')).toBeVisible();
+  await expect(guardian.getByTestId('child-approved-summary')).toHaveCount(0);
+  expect(await guardian.getByTestId('notification-detail').innerText()).not.toMatch(/無視|つらい/);
+});

@@ -149,7 +149,8 @@ steps:
   - id: kb-publish
     name: ${_NODE_IMAGE}
     entrypoint: sh
-    waitFor: [test]
+    # ナレッジベースを公開する前に、評価の基準を必ず通す（docs/02「評価・リリース基準・オブザーバビリティ」）
+    waitFor: [test, eval-scripted, eval-gemini-judge]
     args:
       - -c
       - |

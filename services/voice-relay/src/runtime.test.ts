@@ -6,10 +6,9 @@ import { createNoModelDetector } from '@ijime/crisis-detector';
 import { FsKbSource, Kb, lexiconSchema } from '@ijime/kb-loader';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { VoiceBackendDeps } from './backend.js';
 import { createVoiceRuntime } from './runtime.js';
 
-let overrides: Partial<VoiceBackendDeps>;
+let overrides: NonNullable<Parameters<typeof createVoiceRuntime>[0]>;
 beforeAll(async () => {
   const kb = await Kb.load(
     new FsKbSource(join(dirname(fileURLToPath(import.meta.url)), '../../../kb/v0.1.0')),
@@ -23,6 +22,7 @@ beforeAll(async () => {
     publish: async () => {},
     countMorae: async () => 0,
     requestRecheck: async () => {},
+    requestCrisisRedelivery: async () => {},
   };
 });
 

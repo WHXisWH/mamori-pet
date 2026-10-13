@@ -62,6 +62,14 @@ export const crisis = {
   breakerOpenMs: 30_000,
   // TODO(未定) docs/02-agent-architecture.md「危機検知器」モデルが利用できないときの処理 第2項：保留した入力をどれくらい後に再審査するか
   recheckDelaySeconds: 60,
+  // TODO(未定) docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）：crisis.detected を1回発行するときの制限時間。超えたら失敗として再試行し、子どもに相談窓口の案内を待たせない
+  publishTimeoutMs: 3000,
+  // TODO(未定) docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）：リクエスト内で crisis.detected を最大何回発行するか。それを超えたら Cloud Tasks の再送に回す
+  publishAttempts: 2,
+  // TODO(未定) docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）：発行と次の発行のあいだの待ち時間
+  publishRetryDelayMs: 200,
+  // TODO(未定) docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）：再送タスクを最初に実行するまでの遅延。その後は crisis-recheck キューがバックオフして再試行する
+  redeliveryDelaySeconds: 5,
 } as const;
 
 export const consultation = {
@@ -327,6 +335,12 @@ export const evalFloors = {
   crisisRecallVertex: 0.9,
   // TODO(未定) docs/02-agent-architecture.md「評価・リリース基準・オブザーバビリティ」：作品のお話セットをスクリプト判定したときの結果正解率の下限
   artworkOutcomeScripted: 0.8,
+} as const;
+
+// 外部への Google API（Pub/Sub、Cloud Tasks、FCM）の1回のリクエストの制限時間。止まったリクエスト1つで危機通知の経路がいつまでも止まらないようにする
+// TODO(未定) docs/04-backend-api.md「危機対応経路とエラーコード」、docs/01-prd.md「成功指標と検証計画」の「検知から1分以内に送信」
+export const outbound = {
+  googleApiTimeoutMs: 10_000,
 } as const;
 
 export const slo = {

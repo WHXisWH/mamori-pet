@@ -491,6 +491,37 @@ export const PENDING_DECISIONS: readonly PendingDecision[] = [
     note: '保留したメッセージが crisis-recheck に入ってから再審査するまでの時間',
   },
   {
+    key: 'crisis.publishTimeoutMs',
+    source: 'docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）',
+    status: 'pending',
+    note: 'crisis.detected を1回発行するときの制限時間',
+  },
+  {
+    key: 'crisis.publishAttempts',
+    source: 'docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）',
+    status: 'pending',
+    note: 'リクエスト内で crisis.detected を発行する最大回数。それを超えたら再送に回す',
+  },
+  {
+    key: 'crisis.publishRetryDelayMs',
+    source: 'docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）',
+    status: 'pending',
+    note: '発行と次の発行のあいだの待ち時間',
+  },
+  {
+    key: 'crisis.redeliveryDelaySeconds',
+    source: 'docs/04-backend-api.md「危機対応経路とエラーコード」（2026-10-12 決定）',
+    status: 'pending',
+    note: '再送タスクを最初に実行するまでの遅延',
+  },
+  {
+    key: 'outbound.*',
+    source:
+      'docs/04-backend-api.md「危機対応経路とエラーコード」、docs/01-prd.md「成功指標と検証計画」',
+    status: 'pending',
+    note: '外部への Google API の1回のリクエストの制限時間',
+  },
+  {
     key: 'dekCache.ttlMs',
     source: 'docs/03-database.md「概要と設計原則」第2項（フィールド単位のエンベロープ暗号化）',
     status: 'suggested',

@@ -1,4 +1,4 @@
-import { crisis as crisisConfig } from '@ijime/config';
+import { crisis as crisisConfig, outbound } from '@ijime/config';
 import { z } from 'zod';
 
 import { AdcGoogleHttp, GoogleHttpError, type GoogleHttp } from './google-http.js';
@@ -81,6 +81,7 @@ export class CloudTasksRestQueue implements TaskQueue {
         url: `https://cloudtasks.googleapis.com/v2/${parent}/tasks`,
         method: 'POST',
         body: { task },
+        timeoutMs: outbound.googleApiTimeoutMs,
       });
     } catch (err) {
       if (err instanceof GoogleHttpError && err.status === 409) return;
@@ -123,22 +124,22 @@ export function crisisRecheckRequester(
 }
 
 // ローカル開発ではメモリ上のキューを使う（タスクは実行されない）。本番は Cloud Tasks を使い、sa-tasks の身元で signal-worker を呼び出す
-export function crisisRecheckRequesterFromEnv(opts: {
+export function signalWorkerQueueFromEnv(opts: {
   prod: boolean;
   projectId: string | undefined;
   location: string;
-}): CrisisRecheckRequester {
+}): { queue: TaskQueue; url: string } {
   if (!opts.prod)
-    return crisisRecheckRequester(
-      new MemoryTaskQueue(),
-      process.env['SIGNAL_WORKER_URL'] ?? 'http://localhost:8084',
-    );
+    return {
+      queue: new MemoryTaskQueue(),
+      url: process.env['SIGNAL_WORKER_URL'] ?? 'http://localhost:8084',
+    };
   const url = process.env['SIGNAL_WORKER_URL'];
   const invoker = process.env['TASKS_INVOKER_SA'];
   if (!url || !invoker || !opts.projectId)
     throw new Error('missing env SIGNAL_WORKER_URL / TASKS_INVOKER_SA / GCP_PROJECT_ID');
-  return crisisRecheckRequester(
-    new CloudTasksRestQueue({
+  return {
+    queue: new CloudTasksRestQueue({
       projectId: opts.projectId,
       location: opts.location,
       invokerServiceAccount: invoker,
@@ -146,7 +147,16 @@ export function crisisRecheckRequesterFromEnv(opts: {
       http: new AdcGoogleHttp(),
     }),
     url,
-  );
+  };
+}
+
+export function crisisRecheckRequesterFromEnv(opts: {
+  prod: boolean;
+  projectId: string | undefined;
+  location: string;
+}): CrisisRecheckRequester {
+  const { queue, url } = signalWorkerQueueFromEnv(opts);
+  return crisisRecheckRequester(queue, url);
 }
 
 // 予定した自発ターンは子どもの ID と日付だけを渡し、子どもの内容を Cloud Tasks に入れない。

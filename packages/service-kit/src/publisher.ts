@@ -1,4 +1,5 @@
 import type { PubSubTopic } from '@ijime/api-types';
+import { outbound } from '@ijime/config';
 
 import { eventSchemas, type EventPayload } from './events.js';
 import { AdcGoogleHttp, PlainHttp, type GoogleHttp } from './google-http.js';
@@ -54,6 +55,7 @@ export class PubSubRestPublisher implements Publisher {
       url: `${this.base}/projects/${this.projectId}/topics/${topicResourceName(topic)}:publish`,
       method: 'POST',
       body: { messages: [{ data }] },
+      timeoutMs: outbound.googleApiTimeoutMs,
     });
   }
 }

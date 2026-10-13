@@ -15,7 +15,13 @@ import {
   type ReviewResult,
 } from '@ijime/crisis-detector';
 import { FsKbSource, Kb } from '@ijime/kb-loader';
-import { CRISIS_RECHECK_PATH, Logger, MemoryPublisher, stableId } from '@ijime/service-kit';
+import {
+  CRISIS_RECHECK_PATH,
+  CRISIS_REDELIVERY_PATH,
+  Logger,
+  MemoryPublisher,
+  stableId,
+} from '@ijime/service-kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from './app.js';
@@ -77,7 +83,7 @@ function setup(review: Review) {
       body: JSON.stringify(body),
       headers: { 'Content-Type': 'application/json' },
     });
-  return { lines, publisher, calls, post };
+  return { lines, publisher, calls, post, app };
 }
 
 async function seedPaused(childId: string, text: string, pendingReview = true) {
@@ -231,5 +237,40 @@ describe('crisis recheck task', () => {
     const t = setup(CLEAR);
     expect((await t.post({ childId: 'x' })).status).toBe(204);
     expect(t.calls.review).toBe(0);
+  });
+});
+
+describe('crisis redelivery (decided 2026-10-12)', () => {
+  const event = {
+    childId: 'c_redeliver',
+    crisisId: 'k1',
+    category: 'other',
+    familyHarmSuspected: false,
+  };
+  const send = (app: ReturnType<typeof setup>['app'], body: unknown) =>
+    app.request(CRISIS_REDELIVERY_PATH, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('republishes the crisis event unchanged', async () => {
+    const h = setup('down');
+    expect((await send(h.app, event)).status).toBeLessThan(300);
+    expect(h.publisher.of('crisis.detected')).toEqual([event]);
+  });
+
+  it('fails the task so Cloud Tasks retries while Pub/Sub is down', async () => {
+    const h = setup('down');
+    h.publisher.publish = async () => {
+      throw new Error('pubsub down');
+    };
+    expect((await send(h.app, event)).status).toBeGreaterThanOrEqual(500);
+  });
+
+  it('drops a task carrying anything but the crisis event fields, without publishing', async () => {
+    const h = setup('down');
+    await send(h.app, { ...event, text: SENTINEL });
+    expect(h.publisher.published).toEqual([]);
   });
 });

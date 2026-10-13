@@ -285,9 +285,6 @@ export async function buildAgent(
       safeReply: rt.safeReplies[child.gradeBand],
       ...(gamePreferenceRules ? { gamePreferenceRules } : {}),
       ...(rt.inspectOutput ? { inspectOutput: rt.inspectOutput } : {}),
-      ...(executor.prepareMemory
-        ? { prepareMemory: (content) => executor.prepareMemory!(ctx, content) }
-        : {}),
     }),
   });
 }

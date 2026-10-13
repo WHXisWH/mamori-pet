@@ -4,6 +4,7 @@ import { CRISIS_HIT_CATEGORIES, type PetAction, type TurnChunk } from '@ijime/ap
 import { FsKbSource, Kb, loadQuickReplyCatalog, QUICK_REPLY_INTENTS } from '@ijime/kb-loader';
 import { describe, expect, it, vi } from 'vitest';
 import { createPetAgent } from './agent.js';
+import { createPetCallbacks } from './callbacks.js';
 import { PET_APP_NAME } from './firestore-session.js';
 import { OutputFilter } from './output-filter.js';
 import { ScriptedLlm } from './scripted-llm.js';
@@ -523,5 +524,55 @@ describe('pet tools', () => {
     expect(actions).toEqual([
       { type: 'memory_proposal', proposalId: 'p_1', text: 'ねこが すき', category: 'like' },
     ]);
+  });
+});
+
+// ツール予算で拒否された「覚える」リクエストで、先に人名の認識や仮名の対応表の書き込みをしてはならない
+describe('remember privacy work happens only for calls within budget', () => {
+  it('six remember calls with a budget of three run name detection three times', async () => {
+    const ex = executor();
+    const prepareMemory = vi.fn(async (_ctx: TurnContext, content: string) =>
+      content.replace('田中', 'おともだちA'),
+    );
+    ex.prepareMemory = prepareMemory;
+    const tools = createPetTools(ex, ctx, () => {}, undefined, { maxToolCalls: 3 });
+    const callbacks = createPetCallbacks({
+      filter: new OutputFilter({ rules: [] } as never),
+      safeReply: 'うん。',
+    });
+    const remember = tools.find((t) => t.name === 'remember')!;
+    const toolContext = { invocationId: 'turn-1' } as never;
+    const results: unknown[] = [];
+    for (let i = 0; i < 6; i++) {
+      // ADK の順序：先に前処理のコールバックを実行し、そこで止められなければツールを実行する
+      const args = { content: `田中くんと遊んだ ${i}`, category: 'person' };
+      const blocked = await (callbacks.beforeToolCallback as (a: unknown) => Promise<unknown>)({
+        tool: remember,
+        args,
+        context: toolContext,
+      });
+      results.push(blocked ?? (await remember.runAsync({ args, toolContext })));
+    }
+    expect(
+      results.filter((r) => (r as { error?: string }).error === 'tool_budget_exhausted'),
+    ).toHaveLength(3);
+    expect(prepareMemory).toHaveBeenCalledTimes(3);
+    expect(ex.remember).toHaveBeenCalledTimes(3);
+    expect(ex.remember).toHaveBeenCalledWith(ctx, 'おともだちAくんと遊んだ 0', 'person');
+  });
+
+  it('a name-detection failure declines the memory instead of failing the turn', async () => {
+    const ex = executor();
+    ex.prepareMemory = vi.fn(async () => {
+      throw new Error('private text');
+    });
+    const remember = createPetTools(ex, ctx, () => {}).find((t) => t.name === 'remember')!;
+    expect(
+      await remember.runAsync({
+        args: { content: '田中くん', category: 'person' },
+        toolContext: {} as never,
+      }),
+    ).toEqual({ error: 'memory_privacy_unavailable' });
+    expect(ex.remember).not.toHaveBeenCalled();
   });
 });

@@ -16,13 +16,34 @@ const SEMANTIC_GROUPS = [
   ['話す', 'はなす', '相談', '聞く', 'きく'],
 ] as const;
 
+// 敬称や汎用的な形式名詞・動詞だけでは一致とみなさない。そうしないと「鈴木くんのこと」で「くん」を含む記憶がすべて呼び出されてしまう
+const STOP_TERMS = new Set([
+  'くん',
+  'さん',
+  'ちゃん',
+  'さま',
+  'こと',
+  'もの',
+  'とき',
+  'ところ',
+  'した',
+  'する',
+  'して',
+  'いる',
+  'ある',
+  'なる',
+]);
+
 function termsOf(text: string): string[] {
   const normalized = text.normalize('NFKC').toLowerCase();
   const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
   return [
     ...new Set(
       [...segmenter.segment(normalized)]
-        .filter((part) => part.isWordLike && part.segment.trim().length > 1)
+        .filter(
+          (part) =>
+            part.isWordLike && part.segment.trim().length > 1 && !STOP_TERMS.has(part.segment),
+        )
         .map((part) => part.segment),
     ),
   ];

@@ -26,6 +26,9 @@ locals {
       "notify.email_quota_exhausted",
       "notify.email_rejected",
       "crisis.recheck_enqueue_failed",
+      "crisis.publish_failed",
+      "crisis.redelivery_enqueue_failed",
+      "crisis.persist_failed",
     ]
   }
 
@@ -459,7 +462,7 @@ resource "google_monitoring_alert_policy" "crisis_delivery" {
   notification_channels = local.alert_channels
 
   documentation {
-    content = "保護者に使えるチャネルがない、通知チャネルが未設定、Gmail の送信用認証情報が無効か 1 日の送信上限を超えた、または保留されたメッセージを crisis-recheck キューに入れられなかった。危機通知は引き続き一定間隔で再送される。"
+    content = "保護者に使えるチャネルがない、通知チャネルが未設定、Gmail の送信用認証情報が無効か 1 日の送信上限を超えた、または保留されたメッセージを crisis-recheck キューに入れられなかった。あるいは crisis.detected をリクエスト内で発行できなかった（再送に回した）、再送タスクもキューに入れられなかった、音声の危機記録を書き込めなかった（後の 2 つは保護者に通知が届かないため、手動での対応が必要）。危機通知は引き続き一定間隔で再送される。"
   }
 
   conditions {

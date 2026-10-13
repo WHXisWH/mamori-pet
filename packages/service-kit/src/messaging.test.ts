@@ -1,8 +1,9 @@
+import { outbound } from '@ijime/config';
 import { describe, expect, it } from 'vitest';
 
 import { createServiceApp } from './app.js';
 import { eventSchemas } from './events.js';
-import { GoogleHttpError, type GoogleHttp, type GoogleRequest } from './google-http.js';
+import { GoogleHttpError, PlainHttp, type GoogleHttp, type GoogleRequest } from './google-http.js';
 import { stableId } from './ids.js';
 import { Logger } from './logger.js';
 import { MemoryPublisher, PubSubRestPublisher, topicResourceName } from './publisher.js';
@@ -115,6 +116,8 @@ describe('publishers', () => {
     const data = (call.body as { messages: { data: string }[] }).messages[0]!.data;
     expect(JSON.parse(Buffer.from(data, 'base64').toString())).toMatchObject({ to: 'l2' });
     expect(topicResourceName('crisis.detected')).toBe('crisis-detected');
+    // 危機対応経路での外部への呼び出しには制限時間が必要。止まったリクエスト1つでいつまでも待たされてはならない
+    expect(call.timeoutMs).toBe(outbound.googleApiTimeoutMs);
   });
 });
 
@@ -150,6 +153,7 @@ describe('task queues', () => {
       'projects/p/locations/asia-northeast1/queues/crisis-escalation/tasks/esc-k',
     );
     expect(task['scheduleTime']).toBe('2026-10-01T00:10:00.000Z');
+    expect(http.calls[0]!.timeoutMs).toBe(outbound.googleApiTimeoutMs);
     expect(task['httpRequest']).toMatchObject({
       oidcToken: {
         serviceAccountEmail: 'inv@p.iam.gserviceaccount.com',
@@ -169,5 +173,19 @@ describe('task queues', () => {
     await expect(
       conflict.enqueue({ queue: 'notify-send', url: 'u', body: {}, taskId: 'x' }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('PlainHttp', () => {
+  it('aborts a request that exceeds its timeout', async () => {
+    const hanging = (async (_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason)),
+      )) as unknown as typeof fetch;
+    const started = Date.now();
+    await expect(
+      new PlainHttp(hanging).request({ url: 'http://x', method: 'POST', timeoutMs: 20 }),
+    ).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });

@@ -43,6 +43,67 @@ export function createModelNameDetector(kb: Kb, model: BaseLlm): NameDetector {
   };
 }
 
+type Mapping = [string, string][];
+
+function savedMapping(
+  saved: { exists: boolean; get(field: string): unknown },
+  decrypt: (enc: Buffer) => string,
+): Mapping {
+  const mapping: Mapping = saved.exists
+    ? JSON.parse(decrypt(Buffer.from(saved.get('mapEnc') as Uint8Array)))
+    : [];
+  if (
+    !Array.isArray(mapping) ||
+    mapping.length > agent.pseudonymMapLimit ||
+    mapping.some(
+      (entry) =>
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        entry.some((v) => typeof v !== 'string') ||
+        !entry[0] ||
+        entry[0].length > 40 ||
+        !/^おともだち[A-Z]+$/u.test(entry[1]),
+    )
+  )
+    throw new Error('invalid_pseudonym_map');
+  return mapping;
+}
+
+// Replace longest literal names first without ever interpreting a name as a regex.
+function applyMapping(text: string, mapping: Mapping): string {
+  let remaining = text;
+  let output = '';
+  const ordered = [...mapping].sort((a, b) => b[0].length - a[0].length);
+  while (remaining) {
+    const match = ordered.find(([name]) => remaining.startsWith(name));
+    output += match?.[1] ?? remaining[0];
+    remaining = remaining.slice(match?.[0].length ?? 1);
+  }
+  return output;
+}
+
+// 読み取りのみ：保存済みの対応表で元の名前を仮名に置き換え、思い出すときの検索語に使う。人名の認識も対応表への書き込みもしない
+export function createPseudonymReader(input: {
+  db: Firestore;
+  child: ChildRecord;
+  sessions: FirestoreSessionService;
+}): (text: string) => Promise<string> {
+  const { db, child, sessions } = input;
+  const ref = db.doc(`${childPath(child.familyId, child.childId)}/private/pseudonyms`);
+  const aad = `${ref.path}#mapEnc`;
+  return async (text) => {
+    try {
+      const mapping = savedMapping(await ref.get(), (enc) =>
+        sessions.decryptForChild(child, enc, aad),
+      );
+      return applyMapping(text, mapping);
+    } catch {
+      // 対応表を読めないときは元の語のままローカルで照合する。検索語はこのサービスの外に出さない
+      return text;
+    }
+  };
+}
+
 export function createMemorySanitizer(input: {
   db: Firestore;
   child: ChildRecord;
@@ -63,23 +124,7 @@ export function createMemorySanitizer(input: {
       const owner = await tx.get(db.doc(base));
       const saved = await tx.get(ref);
       if (!owner.exists || owner.get('status') !== 'active') throw new Error('child_not_active');
-      const mapping: [string, string][] = saved.exists
-        ? JSON.parse(sessions.decryptForChild(child, Buffer.from(saved.get('mapEnc')), aad))
-        : [];
-      if (
-        !Array.isArray(mapping) ||
-        mapping.length > agent.pseudonymMapLimit ||
-        mapping.some(
-          (entry) =>
-            !Array.isArray(entry) ||
-            entry.length !== 2 ||
-            entry.some((v) => typeof v !== 'string') ||
-            !entry[0] ||
-            entry[0].length > 40 ||
-            !/^おともだち[A-Z]+$/u.test(entry[1]),
-        )
-      )
-        throw new Error('invalid_pseudonym_map');
+      const mapping = savedMapping(saved, (enc) => sessions.decryptForChild(child, enc, aad));
       let changed = false;
       for (const name of names) {
         if (mapping.some(([original]) => original === name)) continue;
@@ -99,16 +144,7 @@ export function createMemorySanitizer(input: {
           mapEnc: sessions.encryptForChild(child, JSON.stringify(mapping), aad),
           updatedAt: new Date(),
         });
-      // Replace longest literal names first without ever interpreting a name as a regex.
-      let remaining = text;
-      let output = '';
-      const ordered = [...mapping].sort((a, b) => b[0].length - a[0].length);
-      while (remaining) {
-        const match = ordered.find(([name]) => remaining.startsWith(name));
-        output += match?.[1] ?? remaining[0];
-        remaining = remaining.slice(match?.[0].length ?? 1);
-      }
-      return output;
+      return applyMapping(text, mapping);
     });
   };
   return (text) => {

@@ -120,3 +120,34 @@ describe('local manual preview', () => {
       expect(isLocalManualPreview({ ...manual, ...change })).toBe(false);
   });
 });
+
+// 危機通知の速さ（docs/01-prd.md「成功指標と検証計画」の「検知から1分以内に送信」）：
+// 子どもの送信から crisis.detected の発行完了までを設定値の最悪ケースで計算し、その後のプッシュ、notifier、送信チャネルに少なくとも半分を残す
+describe('crisis notification latency budget', () => {
+  const c = values.crisis;
+  const publishWorstMs =
+    c.publishTimeoutMs * c.publishAttempts + c.publishRetryDelayMs * (c.publishAttempts - 1);
+  const budgetMs = (c.notifyWithinSeconds * 1000) / 2;
+
+  it('keyword hit: review, then publish', () => {
+    expect(c.keywordTimeoutMs + c.reviewTimeoutMs + publishWorstMs).toBeLessThanOrEqual(budgetMs);
+  });
+
+  it('no keyword: screen, review, then publish', () => {
+    expect(
+      c.keywordTimeoutMs + c.screenTimeoutMs + c.reviewTimeoutMs + publishWorstMs,
+    ).toBeLessThanOrEqual(budgetMs);
+  });
+
+  it('end to end, including enqueueing and sending the push, stays within the target', () => {
+    const delivery = 2 * values.outbound.googleApiTimeoutMs;
+    expect(
+      c.keywordTimeoutMs + c.screenTimeoutMs + c.reviewTimeoutMs + publishWorstMs + delivery,
+    ).toBeLessThanOrEqual(c.notifyWithinSeconds * 1000);
+  });
+
+  it('a hanging publish can delay the request only by the bounded retry, never indefinitely', () => {
+    expect(c.publishAttempts).toBeGreaterThanOrEqual(1);
+    expect(publishWorstMs).toBeLessThan(c.notifyWithinSeconds * 1000);
+  });
+});

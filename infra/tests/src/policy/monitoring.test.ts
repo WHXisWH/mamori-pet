@@ -53,6 +53,16 @@ describe('monitoring matches service code and pilot targets', () => {
     for (const e of events) expect(src.includes(`'${e}'`), e).toBe(true);
   });
 
+  // 逆方向：危機対応経路で error として出すイベントにはすべてアラートが必要。そうしないと保護者に通知が届かないときに誰も気づけない
+  it('every crisis error event emitted by a service is alerted', () => {
+    const src = sources();
+    const emitted = new Set(
+      [...src.matchAll(/(?:\.error|logError)\(\s*'(crisis\.[a-z_]+)'/g)].map((m) => m[1]!),
+    );
+    expect(emitted.size).toBeGreaterThan(3);
+    for (const e of emitted) expect(monitoring.includes(`"${e}"`), e).toBe(true);
+  });
+
   it('crisis.check carries the method values the alerts filter on', () => {
     const detector = readFileSync(join(root, 'packages/crisis-detector/src/detector.ts'), 'utf8');
     for (const method of monitoring.matchAll(/metric\.label\.method=\\"([a-z_]+)\\"/g)) {

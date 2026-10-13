@@ -385,6 +385,51 @@ describe('assess: properties', () => {
     }
   });
 
+  // 01-prd モジュール1「リスクレベル分類」：コールドスタート中はベースラインを学ぶだけで、L1・L2 を出さず、当日の複数領域を理由に L3 にもしない
+  it('cold start never raises any level from features alone, whatever the history', () => {
+    const r = rng(4);
+    let raisedOutside = 0;
+    for (let n = 0; n < 300; n++) {
+      const deviate: Partial<Record<Domain, number>> = {};
+      for (const d of ['a', 'i', 'k', 'v', 'd'] as Domain[])
+        if (r() < 0.7) deviate[d] = Math.floor(r() * 21);
+      expect(run({ deviate }, { inColdStart: true }).level).toBe('l0');
+      if (run({ deviate }).level !== 'l0') raisedOutside++;
+    }
+    // 対照：同じ履歴でもコールドスタートを抜けたあとはかなりの割合でレベルが上がる。そうでなければ上の確認に意味がない
+    expect(raisedOutside).toBeGreaterThan(100);
+  });
+
+  // D と K は重みの低い領域：これらだけが外れているときは、どれだけ続いても単独ではどのレベルにもならない
+  it('low-weight domains alone never trigger a level, however long they persist', () => {
+    const r = rng(5);
+    for (let n = 0; n < 300; n++) {
+      const deviate: Partial<Record<Domain, number>> = {
+        d: Math.floor(r() * 22),
+        k: Math.floor(r() * 22),
+      };
+      const missing = Array.from({ length: Math.floor(r() * 3) }, () =>
+        addDays(D, -Math.floor(r() * 14)),
+      );
+      expect(run({ deviate, missing }).level).toBe('l0');
+      // 対照：重みが満点の領域を1つ加えて 7 日続けると、D/K も続いていればレベルが上がる
+      if ((deviate.d ?? 0) >= 7 || (deviate.k ?? 0) >= 7)
+        expect(run({ deviate: { ...deviate, a: 7 }, missing: [] }).level).not.toBe('l0');
+    }
+  });
+
+  // 子どもが被害をはっきり話したとき：履歴にもコールドスタートかどうかにも関係なく L3 にする（コールドスタートの制限を受けない）
+  it('an explicit statement is always L3, in or out of cold start', () => {
+    const r = rng(6);
+    for (let n = 0; n < 200; n++) {
+      const history = randomHistory(r);
+      const explicitDomains = r() < 0.5 ? (['a'] as Domain[]) : (['a', 'd'] as Domain[]);
+      const out = run({}, { history, inColdStart: r() < 0.5, explicitDomains });
+      expect(out.level).toBe('l3');
+      expect(out.explanation.explicit).toBe(true);
+    }
+  });
+
   it('dropping a deviating value on the day never raises the level', () => {
     const r = rng(3);
     for (let n = 0; n < 400; n++) {
